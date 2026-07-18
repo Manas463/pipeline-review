@@ -123,10 +123,19 @@ function RunPage() {
         <div>
           <Eyebrow>Last run / Complete</Eyebrow>
           <SectionTitle>Summary</SectionTitle>
-          <div className="mt-6 grid grid-cols-2 md:grid-cols-3 gap-8">
+          <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-8">
             <Stat label="Accounts found" value={latest.accounts_found ?? 0} />
             <Stat label="Emails generated" value={latest.emails_generated ?? 0} />
             <Stat label="Contacts not found" value={latest.contacts_not_found ?? 0} />
+            <Link
+              to="/drafts"
+              className="group flex flex-col gap-1 border border-dotted border-border p-4 hover:border-primary"
+            >
+              <span className="label text-muted-foreground group-hover:text-primary">Open drafts</span>
+              <span className="label text-3xl text-foreground group-hover:text-primary" style={{ letterSpacing: "0.04em" }}>
+                →
+              </span>
+            </Link>
           </div>
           <div className="mt-8 flex items-center gap-4">
             <Link
@@ -134,6 +143,12 @@ function RunPage() {
               className="label border border-primary text-primary px-5 py-2 hover:bg-primary hover:text-primary-foreground"
             >
               Review accounts →
+            </Link>
+            <Link
+              to="/drafts"
+              className="label bg-primary text-primary-foreground px-5 py-2 hover:opacity-90"
+            >
+              Open all drafts →
             </Link>
             <span className="label text-muted-foreground">
               Finished{" "}
