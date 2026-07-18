@@ -58,16 +58,21 @@ function AccountsList() {
       {data && data.accounts.length > 0 && (
         <ul className="mt-8 divide-y divide-dotted divide-border">
           {data.accounts.map((a) => (
-            <li key={a.id} className="py-6">
+            <li key={a.id} className="py-6 grid grid-cols-[80px_1fr_auto] gap-6 items-start">
               <Link
                 to="/accounts/$id"
                 params={{ id: a.id }}
-                className="grid grid-cols-[80px_1fr_auto] gap-6 items-start hover:opacity-90"
+                className="label text-3xl text-primary hover:opacity-90"
+                style={{ letterSpacing: "0.04em" }}
               >
-                <div className="label text-3xl text-primary" style={{ letterSpacing: "0.04em" }}>
-                  {a.icp_score ?? "—"}
-                </div>
-                <div>
+                {a.icp_score ?? "—"}
+              </Link>
+              <div>
+                <Link
+                  to="/accounts/$id"
+                  params={{ id: a.id }}
+                  className="block hover:opacity-90"
+                >
                   <h3 style={{ fontFamily: "var(--font-serif)" }} className="text-2xl">
                     {a.company}
                   </h3>
@@ -77,11 +82,34 @@ function AccountsList() {
                   {a.why_fit_vs_anchor && (
                     <p className="mt-3 text-foreground/90 max-w-2xl">{a.why_fit_vs_anchor}</p>
                   )}
-                  <div className="mt-3">
-                    <SourceLinks urls={a.sources} />
-                  </div>
+                </Link>
+                <div className="mt-3">
+                  <SourceLinks urls={a.sources} />
                 </div>
-                <span className="label text-muted-foreground self-center">Open →</span>
+                <div className="mt-4 flex gap-2 flex-wrap">
+                  <Link
+                    to="/accounts/$id"
+                    params={{ id: a.id }}
+                    className="label border border-border px-3 py-2 hover:border-primary hover:text-primary"
+                  >
+                    Open dossier →
+                  </Link>
+                  <Link
+                    to="/accounts/$id"
+                    params={{ id: a.id }}
+                    hash="emails"
+                    className="label bg-primary text-primary-foreground px-3 py-2 hover:opacity-90"
+                  >
+                    Open drafts →
+                  </Link>
+                </div>
+              </div>
+              <Link
+                to="/accounts/$id"
+                params={{ id: a.id }}
+                className="label text-muted-foreground self-center hover:text-primary"
+              >
+                Open →
               </Link>
             </li>
           ))}
