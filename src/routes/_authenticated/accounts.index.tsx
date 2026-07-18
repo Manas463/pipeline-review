@@ -80,6 +80,17 @@ function AccountsList() {
                   <div className="mt-3">
                     <SourceLinks urls={a.sources} />
                   </div>
+                  <div className="mt-3">
+                    <Link
+                      to="/accounts/$id"
+                      params={{ id: a.id }}
+                      hash="emails"
+                      onClick={(e) => e.stopPropagation()}
+                      className="label inline-flex items-center gap-2 border border-primary text-primary px-3 py-2 hover:bg-primary hover:text-primary-foreground"
+                    >
+                      Open drafts →
+                    </Link>
+                  </div>
                 </div>
                 <span className="label text-muted-foreground self-center">Open →</span>
               </Link>
