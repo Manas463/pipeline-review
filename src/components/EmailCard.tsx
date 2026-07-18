@@ -5,6 +5,7 @@ import { Pill } from "@/lib/ui";
 
 export type Contact = {
   id: string;
+  account_id?: string;
   name: string | null;
   title: string | null;
   seniority: string | null;
