@@ -1,8 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { Eyebrow, SectionTitle, Divider, Pill, SourceLinks } from "@/lib/ui";
+import { Eyebrow, SectionTitle, Divider, SourceLinks } from "@/lib/ui";
+import { EmailCard, EmailStatusPill, type Contact, type Email } from "@/components/EmailCard";
 
 export const Route = createFileRoute("/_authenticated/accounts/$id")({
   component: AccountDetail,
@@ -34,30 +34,6 @@ type Research = {
   best_hook: string | null;
   best_hook_source: string | null;
   sources: unknown;
-};
-
-type Contact = {
-  id: string;
-  name: string | null;
-  title: string | null;
-  seniority: string | null;
-  linkedin_url: string | null;
-  email: string | null;
-  email_status: string | null;
-  email_verified_status: string | null;
-  email_deliverable: boolean | null;
-  notes: string | null;
-};
-
-type Email = {
-  id: string;
-  contact_id: string;
-  subject: string | null;
-  body: string | null;
-  status: string;
-  signal_used: string | null;
-  critic_verdict: string | null;
-  rewritten_after_critic: boolean | null;
 };
 
 async function fetchAccountBundle(id: string) {
