@@ -100,8 +100,12 @@ function AccountDetail() {
 
   return (
     <div>
-      <Link to="/accounts" className="label text-muted-foreground hover:text-primary">
-        ← Accounts
+      <Link
+        to="/accounts"
+        className="inline-flex items-center gap-3 text-muted-foreground hover:text-primary"
+      >
+        <span aria-hidden className="text-3xl leading-none">←</span>
+        <span className="label">Accounts</span>
       </Link>
       <div className="mt-4 flex items-baseline gap-6 flex-wrap">
         <h1 style={{ fontFamily: "var(--font-serif)" }} className="text-5xl">
