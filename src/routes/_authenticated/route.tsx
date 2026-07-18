@@ -39,11 +39,12 @@ function AuthedLayout() {
           <nav className="flex items-center gap-6">
             <Link
               to="/"
-              className="label text-muted-foreground hover:text-foreground"
+              className="label inline-flex items-center gap-2 text-muted-foreground hover:text-foreground"
               activeProps={{ className: "label text-foreground" }}
               activeOptions={{ exact: true }}
             >
-              Run
+              <span aria-hidden>⌂</span>
+              <span>Home</span>
             </Link>
             <Link
               to="/accounts"
