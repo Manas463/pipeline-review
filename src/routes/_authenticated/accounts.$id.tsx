@@ -324,17 +324,25 @@ function EmailCard({ email, contact }: { email: Email; contact: Contact | undefi
   return (
     <article className="border-t border-dotted border-border pt-6">
       <header>
-        <div className="label text-muted-foreground">
-          To {contact?.name ?? "—"}
-          {contact?.email ? ` · ${contact.email}` : ""}
-        </div>
-        <div className="mt-1 flex gap-2 flex-wrap items-center">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="label text-primary text-xl">
+            To {contact?.name ?? "—"}
+            {contact?.email ? ` · ${contact.email}` : ""}
+          </div>
           <Pill tone={email.status === "sent" ? "ok" : email.status === "ready" ? "accent" : "muted"}>
             {email.status}
           </Pill>
-          {email.signal_used && <Pill>signal: {email.signal_used}</Pill>}
-          {email.rewritten_after_critic && <Pill tone="warn">rewritten</Pill>}
         </div>
+        {email.signal_used && (
+          <div className="mt-2 label text-muted-foreground border border-border px-3 py-2">
+            Signal: {email.signal_used}
+          </div>
+        )}
+        {email.rewritten_after_critic && (
+          <div className="mt-2">
+            <Pill tone="warn">rewritten</Pill>
+          </div>
+        )}
       </header>
 
       <div className="mt-6">
