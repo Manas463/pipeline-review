@@ -321,60 +321,17 @@ function EmailCard({ email, contact }: { email: Email; contact: Contact | undefi
 
   return (
     <article className="border-t border-dotted border-border pt-6">
-      <header className="flex items-baseline justify-between gap-4 flex-wrap">
-        <div>
-          <div className="label text-muted-foreground">
-            To {contact?.name ?? "—"}
-            {contact?.email ? ` · ${contact.email}` : ""}
-          </div>
-          <div className="mt-1 flex gap-2 flex-wrap">
-            <Pill tone={email.status === "sent" ? "ok" : email.status === "ready" ? "accent" : "muted"}>
-              {email.status}
-            </Pill>
-            {email.signal_used && <Pill>signal: {email.signal_used}</Pill>}
-            {email.rewritten_after_critic && <Pill tone="warn">rewritten</Pill>}
-          </div>
+      <header>
+        <div className="label text-muted-foreground">
+          To {contact?.name ?? "—"}
+          {contact?.email ? ` · ${contact.email}` : ""}
         </div>
-        <div className="flex gap-2">
-          {!editing && (
-            <button onClick={() => setEditing(true)} className="label border border-border px-3 py-2 hover:border-primary hover:text-primary">
-              Edit
-            </button>
-          )}
-          {editing && (
-            <>
-              <button
-                onClick={() => {
-                  setSubject(email.subject ?? "");
-                  setBody(email.body ?? "");
-                  setEditing(false);
-                }}
-                className="label border border-border px-3 py-2 hover:text-foreground"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => save.mutate()}
-                disabled={save.isPending}
-                className="label bg-foreground text-background px-3 py-2 disabled:opacity-50"
-              >
-                {save.isPending ? "Saving…" : "Save"}
-              </button>
-            </>
-          )}
-          <button onClick={copy} className="label border border-border px-3 py-2 hover:border-primary hover:text-primary">
-            {copied ? "Copied ✓" : "Copy"}
-          </button>
-          {gmailUrl && (
-            <a
-              href={gmailUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="label bg-primary text-primary-foreground px-4 py-2 hover:opacity-90"
-            >
-              Send in Gmail ↗
-            </a>
-          )}
+        <div className="mt-1 flex gap-2 flex-wrap items-center">
+          <Pill tone={email.status === "sent" ? "ok" : email.status === "ready" ? "accent" : "muted"}>
+            {email.status}
+          </Pill>
+          {email.signal_used && <Pill>signal: {email.signal_used}</Pill>}
+          {email.rewritten_after_critic && <Pill tone="warn">rewritten</Pill>}
         </div>
       </header>
 
@@ -405,6 +362,48 @@ function EmailCard({ email, contact }: { email: Email; contact: Contact | undefi
           <p className="mt-4 label text-muted-foreground">Critic: {email.critic_verdict}</p>
         )}
         {save.error && <p className="mt-3 label text-red-400">{(save.error as Error).message}</p>}
+      </div>
+
+      <div className="mt-5 flex gap-2 flex-wrap">
+        {!editing && (
+          <button onClick={() => setEditing(true)} className="label border border-border px-3 py-2 hover:border-primary hover:text-primary">
+            Edit
+          </button>
+        )}
+        {editing && (
+          <>
+            <button
+              onClick={() => {
+                setSubject(email.subject ?? "");
+                setBody(email.body ?? "");
+                setEditing(false);
+              }}
+              className="label border border-border px-3 py-2 hover:text-foreground"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => save.mutate()}
+              disabled={save.isPending}
+              className="label bg-foreground text-background px-3 py-2 disabled:opacity-50"
+            >
+              {save.isPending ? "Saving…" : "Save"}
+            </button>
+          </>
+        )}
+        <button onClick={copy} className="label border border-border px-3 py-2 hover:border-primary hover:text-primary">
+          {copied ? "Copied ✓" : "Copy"}
+        </button>
+        {gmailUrl && (
+          <a
+            href={gmailUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="label bg-primary text-primary-foreground px-4 py-2 hover:opacity-90"
+          >
+            Send in Gmail ↗
+          </a>
+        )}
       </div>
     </article>
   );
