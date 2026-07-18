@@ -196,8 +196,10 @@ function AccountDetail() {
 
       <Divider />
 
-      <Eyebrow>Drafts</Eyebrow>
-      <SectionTitle>Emails</SectionTitle>
+      <div id="emails" className="scroll-mt-24">
+        <Eyebrow>Drafts</Eyebrow>
+        <SectionTitle>Emails</SectionTitle>
+      </div>
       {emails.length === 0 && <p className="mt-6 text-muted-foreground">No drafts yet.</p>}
       <div className="mt-6 space-y-8">
         {emails.map((e) => {
