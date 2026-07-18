@@ -53,6 +53,13 @@ function AuthedLayout() {
             >
               Accounts
             </Link>
+            <Link
+              to="/drafts"
+              className="label text-muted-foreground hover:text-foreground"
+              activeProps={{ className: "label text-foreground" }}
+            >
+              Drafts
+            </Link>
             <span className="label text-muted-foreground hidden md:inline">{email}</span>
             <button onClick={signOut} className="label text-muted-foreground hover:text-primary">
               Sign out
