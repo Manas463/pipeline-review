@@ -53,7 +53,7 @@ export function EmailCard({
 }: {
   email: Email;
   contact?: Contact;
-  accountName?: string | null;
+  accountName?: ReactNode;
   invalidateKeys?: string[];
 }) {
   const qc = useQueryClient();
