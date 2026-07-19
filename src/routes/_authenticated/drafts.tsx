@@ -72,40 +72,28 @@ async function fetchAllDrafts(): Promise<{
   return { emails: deduped, contacts: contactsById, accounts: accountsById };
 }
 
-const STATUS_FILTERS = ["Verified", "Risky", "Invalid", "Not found"] as const;
-
 function DraftsPage() {
   const [sort, setSort] = useState<"newest" | "oldest">("newest");
-  const [filters, setFilters] = useState<Set<string>>(() => new Set());
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
   const { data, isLoading, error } = useQuery({
     queryKey: ["drafts"],
     queryFn: fetchAllDrafts,
   });
 
-  const toggleFilter = (s: string) =>
-    setFilters((prev) => {
-      const next = new Set(prev);
-      if (next.has(s)) next.delete(s);
-      else next.add(s);
-      return next;
-    });
-
-  // Filter (multi-select, narrows what's shown) and sort (orders what's left) are independent —
-  // so you can e.g. show only Verified AND sort Newest at the same time.
+  // Filter ("verified only") and sort are independent. When the filter is off, all drafts show.
   const shown = useMemo(() => {
     if (!data) return [];
     let arr = data.emails; // fetched newest-first
-    if (filters.size > 0) {
+    if (verifiedOnly) {
       arr = arr.filter((e) => {
         const c = data.contacts[e.contact_id];
-        const label = c ? normalizeStatus(c).label : "Unknown";
-        return filters.has(label);
+        return c ? normalizeStatus(c).label === "Verified" : false;
       });
     }
     const out = [...arr];
     if (sort === "oldest") out.reverse();
     return out;
-  }, [data, sort, filters]);
+  }, [data, sort, verifiedOnly]);
 
   return (
     <div>
@@ -132,34 +120,24 @@ function DraftsPage() {
         <div className="mt-8">
           <div className="mb-8 flex items-start justify-between gap-6 flex-wrap">
             <p className="label text-muted-foreground">
-              {filters.size > 0
+              {verifiedOnly
                 ? `${shown.length} of ${data.emails.length} drafts`
                 : `${data.emails.length} draft${data.emails.length === 1 ? "" : "s"} across all runs`}
             </p>
             <div className="flex items-start gap-6 flex-wrap">
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
                 <span className="label text-muted-foreground mr-1">Filter</span>
-                {STATUS_FILTERS.map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => toggleFilter(s)}
-                    className={`label px-3 py-2 border ${
-                      filters.has(s)
-                        ? "border-primary text-primary"
-                        : "border-border text-muted-foreground hover:text-foreground"
-                    }`}
-                  >
-                    {s}
-                  </button>
-                ))}
-                {filters.size > 0 && (
-                  <button
-                    onClick={() => setFilters(new Set())}
-                    className="label px-2 py-2 text-muted-foreground hover:text-primary underline decoration-dotted underline-offset-4"
-                  >
-                    Clear
-                  </button>
-                )}
+                <button
+                  onClick={() => setVerifiedOnly((v) => !v)}
+                  aria-pressed={verifiedOnly}
+                  className={`label px-3 py-2 border ${
+                    verifiedOnly
+                      ? "border-primary text-primary"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Verified only
+                </button>
               </div>
               <div className="flex items-center gap-2">
                 <span className="label text-muted-foreground mr-1">Sort</span>
