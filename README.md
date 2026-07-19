@@ -6,6 +6,21 @@ The actual agent (account sourcing → research → contact discovery → email 
 
 **Inspecting the agent logic:** the complete n8n workflow (all nodes, keys redacted) is included here as [`flytbase-bdr-agent.n8n.json`](./flytbase-bdr-agent.n8n.json) — import it into any n8n instance to see the full staged pipeline (account ID → research → contacts + email waterfall → writer/critic/rewrite → Supabase + Google Sheets).
 
+## Running the n8n workflow yourself (where each API key goes)
+
+If you import `flytbase-bdr-agent.n8n.json` into your own n8n and want to run it, the keys are left as placeholders. Here's exactly where each one goes:
+
+| Provider | Used for | Where to set it in n8n |
+|---|---|---|
+| **OpenAI** (GPT-4.1 + web search) | account finding, research, email writing/critic | HTTP Header Auth credential on the `GPT-4.1: *` nodes (`Authorization: Bearer <key>`) |
+| **Tavily** | LinkedIn / contact detail lookup | credential on the `Tavily: LinkedIn Lookup` node |
+| **Prospeo** | primary email finder | `const keys = { prospeo: '...' }` at the top of the **`Resolve Email (Waterfall)`** code node (replace `<<PROSPEO_API_KEY>>`) |
+| **Hunter.io** | fallback email finder + verifier | same `keys` object in `Resolve Email (Waterfall)` (replace `<<HUNTER_API_KEY>>`) |
+| **Google Sheets** | output sheet | Google Sheets OAuth2 credential on the `Google Sheets: Append Contacts` node |
+| **Supabase** | writing run results back (what this app reads) | Supabase API credential (service_role) on the `Create Run` and `Import Results` nodes |
+
+The workflow is webhook-triggered; activate it and use the **Production** webhook URL. `VERIFY = true` in the `Resolve Email` node runs Hunter's deliverability check — set it to `false` to conserve Hunter credits.
+
 ## Tech stack
 
 TanStack Start (SSR) · React · Vite · TypeScript · Tailwind CSS · shadcn/ui · Supabase JS client. Package manager: bun.
