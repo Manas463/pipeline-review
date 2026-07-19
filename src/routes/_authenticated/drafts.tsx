@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Eyebrow, SectionTitle, Divider } from "@/lib/ui";
-import { EmailCard, type Contact, type Email } from "@/components/EmailCard";
+import { EmailCard, normalizeStatus, type Contact, type Email } from "@/components/EmailCard";
 
 export const Route = createFileRoute("/_authenticated/drafts")({
   component: DraftsPage,
@@ -72,13 +73,36 @@ async function fetchAllDrafts(): Promise<{
 }
 
 function DraftsPage() {
+  const [sort, setSort] = useState<"newest" | "oldest" | "verified">("newest");
   const { data, isLoading, error } = useQuery({
     queryKey: ["drafts"],
     queryFn: fetchAllDrafts,
   });
 
+  const sortedEmails = useMemo(() => {
+    if (!data) return [];
+    const arr = [...data.emails]; // fetched newest-first
+    if (sort === "oldest") return arr.reverse();
+    if (sort === "verified") {
+      const isVerified = (e: Email) => {
+        const c = data.contacts[e.contact_id];
+        return c ? normalizeStatus(c).label === "Verified" : false;
+      };
+      // stable sort: verified drafts first, newest-first order preserved within each group
+      return arr.sort((a, b) => Number(isVerified(b)) - Number(isVerified(a)));
+    }
+    return arr;
+  }, [data, sort]);
+
   return (
     <div>
+      <Link
+        to="/"
+        className="inline-flex items-center gap-3 text-muted-foreground hover:text-primary mb-6"
+      >
+        <span aria-hidden className="text-3xl leading-none">←</span>
+        <span className="label">Home</span>
+      </Link>
       <Eyebrow>03 / Drafts</Eyebrow>
       <SectionTitle>All drafted emails</SectionTitle>
 
@@ -91,11 +115,27 @@ function DraftsPage() {
 
       {data && data.emails.length > 0 && (
         <div className="mt-8">
-          <p className="label text-muted-foreground mb-6">
+          <p className="label text-muted-foreground mb-4">
             {data.emails.length} draft{data.emails.length === 1 ? "" : "s"} across all runs
           </p>
+          <div className="mb-8 flex items-center gap-3 flex-wrap">
+            <span className="label text-muted-foreground">Sort</span>
+            {(["newest", "oldest", "verified"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setSort(s)}
+                className={`label px-3 py-2 border capitalize ${
+                  sort === s
+                    ? "border-primary text-primary"
+                    : "border-border text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {s === "verified" ? "Verified first" : `${s} first`}
+              </button>
+            ))}
+          </div>
           <div className="space-y-8">
-            {data.emails.map((email) => {
+            {sortedEmails.map((email) => {
               const contact = data.contacts[email.contact_id];
               const account = contact ? data.accounts[contact.account_id as string] : undefined;
               return (

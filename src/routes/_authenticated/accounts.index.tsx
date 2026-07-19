@@ -73,6 +73,13 @@ function AccountsList() {
 
   return (
     <div>
+      <Link
+        to="/"
+        className="inline-flex items-center gap-3 text-muted-foreground hover:text-primary mb-6"
+      >
+        <span aria-hidden className="text-3xl leading-none">←</span>
+        <span className="label">Home</span>
+      </Link>
       <Eyebrow>02 / Accounts</Eyebrow>
       <SectionTitle>Sourced across all runs</SectionTitle>
 
