@@ -34,11 +34,41 @@ async function fetchLatestRun(): Promise<Run | null> {
 }
 
 async function fetchTotals(): Promise<{ accounts: number; emails: number }> {
-  const [{ count: accounts }, { count: emails }] = await Promise.all([
-    supabase.from("accounts").select("id", { count: "exact", head: true }),
-    supabase.from("emails").select("id", { count: "exact", head: true }),
-  ]);
-  return { accounts: accounts ?? 0, emails: emails ?? 0 };
+  const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+
+  const { data: accountsData, error: aErr } = await supabase
+    .from("accounts")
+    .select("id, company")
+    .limit(10000);
+  if (aErr) throw aErr;
+
+  const companyKeyById = new Map<string, string>();
+  const distinctCompanies = new Set<string>();
+  for (const row of accountsData ?? []) {
+    const key = norm((row as { company: string | null }).company);
+    if (key) {
+      distinctCompanies.add(key);
+      companyKeyById.set((row as { id: string }).id, key);
+    }
+  }
+
+  const { data: emailsData, error: eErr } = await supabase
+    .from("emails")
+    .select("id, contact:contacts!inner(name, account_id)")
+    .limit(10000);
+  if (eErr) throw eErr;
+
+  const distinctEmailPairs = new Set<string>();
+  for (const row of emailsData ?? []) {
+    const contact = (row as { contact: { name: string | null; account_id: string } | null }).contact;
+    if (!contact) continue;
+    const company = companyKeyById.get(contact.account_id) ?? "";
+    const name = norm(contact.name);
+    if (!company || !name) continue;
+    distinctEmailPairs.add(`${company}::${name}`);
+  }
+
+  return { accounts: distinctCompanies.size, emails: distinctEmailPairs.size };
 }
 
 function RunPage() {
@@ -46,6 +76,7 @@ function RunPage() {
   const [triggering, setTriggering] = useState(false);
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [targetVertical, setTargetVertical] = useState("");
 
   const { data: latest } = useQuery({
     queryKey: ["latest-run"],
@@ -78,7 +109,7 @@ function RunPage() {
       const res = await fetch("https://mj463.app.n8n.cloud/webhook/run-campaign", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: "{}",
+        body: JSON.stringify({ target_vertical: targetVertical.trim() }),
       });
       if (!res.ok) throw new Error(`Webhook responded ${res.status}`);
       const json = (await res.json()) as { id?: string };
@@ -96,11 +127,25 @@ function RunPage() {
       <Eyebrow>01 / Run</Eyebrow>
       <SectionTitle>Trigger the outbound pipeline</SectionTitle>
       <p className="mt-3 text-muted-foreground max-w-xl">
-        Kicks off a full pass: sources accounts, enriches them, finds decision makers, and drafts
-        cold emails. Takes a few minutes.
+        Optional: set a target vertical, or leave blank for the default LatAm mining brief. Adds to
+        the accounts list below. Takes a few minutes.
       </p>
 
-      <div className="mt-8 flex items-center gap-4">
+      <div className="mt-8 max-w-xl">
+        <label className="label text-muted-foreground block mb-2" htmlFor="target-vertical">
+          Target vertical
+        </label>
+        <input
+          id="target-vertical"
+          type="text"
+          value={targetVertical}
+          onChange={(e) => setTargetVertical(e.target.value)}
+          placeholder="Large-scale lithium, copper, and iron ore mining operations in Latin America"
+          className="w-full bg-input/40 border border-border px-3 py-2 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:border-primary"
+        />
+      </div>
+
+      <div className="mt-6 flex items-center gap-4">
         <button
           onClick={handleRun}
           disabled={isRunning}
