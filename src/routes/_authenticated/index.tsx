@@ -33,6 +33,20 @@ async function fetchLatestRun(): Promise<Run | null> {
   return (data as Run | null) ?? null;
 }
 
+// The most recent COMPLETED run — shown as the summary even while a newer run is still running,
+// so the recruiter can review previous results instead of staring at a spinner for 2-3 minutes.
+async function fetchLatestDoneRun(): Promise<Run | null> {
+  const { data, error } = await supabase
+    .from("runs")
+    .select("*")
+    .eq("status", "done")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as Run | null) ?? null;
+}
+
 async function fetchTotals(): Promise<{ accounts: number; emails: number }> {
   const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
 
@@ -89,18 +103,32 @@ function RunPage() {
     },
   });
 
+  const isRunning = triggering || latest?.status === "running" || !!activeRunId;
+
+  // Last completed run — always shown, even while a newer run is mid-flight. Poll it while a run
+  // is in progress so it swaps in the fresh results the moment the new run finishes.
+  const { data: latestDone } = useQuery({
+    queryKey: ["latest-done-run"],
+    queryFn: fetchLatestDoneRun,
+    refetchInterval: isRunning ? 4000 : false,
+  });
+
   const { data: totals } = useQuery({
     queryKey: ["run-totals"],
     queryFn: fetchTotals,
+    refetchInterval: isRunning ? 4000 : false,
   });
 
   useEffect(() => {
     if (activeRunId && latest?.id === activeRunId && latest.status !== "running") {
       setActiveRunId(null);
+      // A run just finished — refresh everything that depends on it.
+      qc.invalidateQueries({ queryKey: ["latest-done-run"] });
+      qc.invalidateQueries({ queryKey: ["run-totals"] });
+      qc.invalidateQueries({ queryKey: ["accounts-all"] });
+      qc.invalidateQueries({ queryKey: ["drafts"] });
     }
-  }, [latest, activeRunId]);
-
-  const isRunning = triggering || latest?.status === "running" || !!activeRunId;
+  }, [latest, activeRunId, qc]);
 
   async function handleRun() {
     setTriggerError(null);
@@ -156,16 +184,26 @@ function RunPage() {
         {triggerError && <span className="label text-red-400">{triggerError}</span>}
       </div>
 
-      {isRunning && <StageProgress startedAt={latest?.started_at} />}
+      {isRunning && (
+        <>
+          <StageProgress startedAt={latest?.started_at} />
+          {latestDone && (
+            <p className="label text-primary mt-4">
+              A new run is in progress — your last completed run is shown below and will refresh
+              automatically when the new one finishes.
+            </p>
+          )}
+        </>
+      )}
 
       <Divider />
 
-      {!latest && !isRunning && (
+      {!latest && !latestDone && !isRunning && (
         <p className="text-muted-foreground">No runs yet. Click Run to start.</p>
       )}
 
       {latest && latest.status === "failed" && (
-        <div>
+        <div className="mb-10">
           <Eyebrow>Last run / Failed</Eyebrow>
           <SectionTitle>The pipeline broke</SectionTitle>
           <pre className="mt-4 border border-red-500/40 bg-red-500/5 p-4 text-sm text-red-300 whitespace-pre-wrap font-mono">
@@ -177,15 +215,15 @@ function RunPage() {
         </div>
       )}
 
-      {latest && latest.status === "done" && (
+      {latestDone && (
         <div>
-          <Eyebrow>Last run / Complete</Eyebrow>
+          <Eyebrow>Latest completed run</Eyebrow>
           <SectionTitle>Summary</SectionTitle>
           <div className="mt-6">
             <p className="label text-muted-foreground mb-4">This run</p>
             <div className="grid grid-cols-2 gap-8">
-              <Stat label="Accounts found" value={latest.accounts_found ?? 0} />
-              <Stat label="Emails generated" value={latest.emails_generated ?? 0} />
+              <Stat label="Accounts found" value={latestDone.accounts_found ?? 0} />
+              <Stat label="Emails generated" value={latestDone.emails_generated ?? 0} />
             </div>
           </div>
           <div className="mt-10 border-t border-dotted border-border pt-6">
@@ -195,7 +233,7 @@ function RunPage() {
               <Stat label="Emails generated (total)" value={totals?.emails ?? "—"} />
             </div>
           </div>
-          <div className="mt-8 flex items-center gap-4">
+          <div className="mt-8 flex items-center gap-4 flex-wrap">
             <Link
               to="/accounts"
               className="label border border-primary text-primary px-5 py-2 hover:bg-primary hover:text-primary-foreground"
@@ -210,10 +248,10 @@ function RunPage() {
             </Link>
             <span className="label text-muted-foreground">
               Finished{" "}
-              {latest.finished_at ? new Date(latest.finished_at).toLocaleString() : "—"}
+              {latestDone.finished_at ? new Date(latestDone.finished_at).toLocaleString() : "—"}
             </span>
           </div>
-          <NotFoundDetail run={latest} />
+          <NotFoundDetail run={latestDone} />
         </div>
       )}
     </div>
