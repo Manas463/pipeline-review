@@ -178,14 +178,13 @@ export function EmailCard({
           {copied ? "Copied ✓" : "Copy"}
         </button>
         {gmailUrl && (
-          <a
-            href={gmailUrl}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            type="button"
+            onClick={() => window.open(gmailUrl, "_blank", "noopener,noreferrer")}
             className="label bg-primary text-primary-foreground px-4 py-2 hover:opacity-90"
           >
             Send in Gmail ↗
-          </a>
+          </button>
         )}
       </div>
     </article>
