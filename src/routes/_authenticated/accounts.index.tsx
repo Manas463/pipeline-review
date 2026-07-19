@@ -20,6 +20,8 @@ type Account = {
   created_at: string;
 };
 
+const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+
 async function fetchAllAccounts(): Promise<Account[]> {
   const { data, error } = await supabase
     .from("accounts")
@@ -27,7 +29,33 @@ async function fetchAllAccounts(): Promise<Account[]> {
     .order("created_at", { ascending: false })
     .limit(10000);
   if (error) throw error;
-  return (data as Account[]) ?? [];
+  const accounts = (data as Account[]) ?? [];
+  if (accounts.length === 0) return [];
+
+  // Pull contacts so we can dedupe: the same company should appear only once,
+  // UNLESS a later run surfaced a genuinely different set of contacts.
+  const { data: contactData } = await supabase
+    .from("contacts")
+    .select("account_id, name, email")
+    .in("account_id", accounts.map((a) => a.id))
+    .limit(10000);
+
+  const sigByAccount: Record<string, string[]> = {};
+  for (const c of (contactData as { account_id: string; name: string | null; email: string | null }[]) ?? []) {
+    (sigByAccount[c.account_id] ??= []).push(`${norm(c.name)}|${norm(c.email)}`);
+  }
+
+  // accounts are newest-first, so the first occurrence of a key is the one we keep
+  const seen = new Set<string>();
+  const deduped: Account[] = [];
+  for (const a of accounts) {
+    const contactSig = (sigByAccount[a.id] ?? []).slice().sort().join(",");
+    const key = `${norm(a.company)}::${contactSig}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(a);
+  }
+  return deduped;
 }
 
 function AccountsList() {

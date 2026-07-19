@@ -106,8 +106,18 @@ function AccountDetail() {
 
       <Divider />
 
-      <Eyebrow>Dossier</Eyebrow>
-      <SectionTitle>Research</SectionTitle>
+      <div id="dossier" className="scroll-mt-24 flex items-end justify-between gap-4 flex-wrap">
+        <div>
+          <Eyebrow>Dossier</Eyebrow>
+          <SectionTitle>Research</SectionTitle>
+        </div>
+        <a
+          href="#emails"
+          className="label border border-border px-3 py-2 hover:border-primary hover:text-primary"
+        >
+          Open drafts ↓
+        </a>
+      </div>
       {!research && <p className="mt-6 text-muted-foreground">No research recorded.</p>}
       {research && (
         <div className="mt-6 space-y-8">

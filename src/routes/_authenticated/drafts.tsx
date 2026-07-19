@@ -15,26 +15,18 @@ type Account = {
   icp_score: number | null;
 };
 
-async function fetchLatestDrafts(): Promise<{
+const norm = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
+
+async function fetchAllDrafts(): Promise<{
   emails: Email[];
   contacts: Record<string, Contact>;
   accounts: Record<string, Account>;
 }> {
-  const { data: run, error: runErr } = await supabase
-    .from("runs")
-    .select("id")
-    .eq("status", "done")
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (runErr) throw runErr;
-  if (!run) return { emails: [], contacts: {}, accounts: {} };
-
+  // Span ALL runs (not just the latest) so every drafted email is reachable.
   const { data: accounts, error: accountsErr } = await supabase
     .from("accounts")
     .select("id, run_id, company, icp_score")
-    .eq("run_id", run.id)
-    .order("icp_score", { ascending: false });
+    .limit(10000);
   if (accountsErr) throw accountsErr;
 
   const accountList = (accounts as Account[]) ?? [];
@@ -44,7 +36,8 @@ async function fetchLatestDrafts(): Promise<{
   const { data: contacts, error: contactsErr } = await supabase
     .from("contacts")
     .select("*")
-    .in("account_id", accountIds);
+    .in("account_id", accountIds)
+    .limit(10000);
   if (contactsErr) throw contactsErr;
 
   const contactList = (contacts as Contact[]) ?? [];
@@ -55,23 +48,33 @@ async function fetchLatestDrafts(): Promise<{
     .from("emails")
     .select("*")
     .in("contact_id", contactIds)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(10000);
   if (emailsErr) throw emailsErr;
 
   const contactsById = Object.fromEntries(contactList.map((c) => [c.id, c]));
   const accountsById = Object.fromEntries(accountList.map((a) => [a.id, a]));
 
-  return {
-    emails: (emails as Email[]) ?? [],
-    contacts: contactsById,
-    accounts: accountsById,
-  };
+  // Dedupe: one draft per (company + contact identity). Emails are newest-first,
+  // so re-runs that regenerate the same person's email collapse to the latest one.
+  const seen = new Set<string>();
+  const deduped: Email[] = [];
+  for (const e of (emails as Email[]) ?? []) {
+    const contact = contactsById[e.contact_id];
+    const account = contact ? accountsById[contact.account_id as string] : undefined;
+    const key = `${norm(account?.company)}::${norm(contact?.name)}|${norm(contact?.email)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(e);
+  }
+
+  return { emails: deduped, contacts: contactsById, accounts: accountsById };
 }
 
 function DraftsPage() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["drafts"],
-    queryFn: fetchLatestDrafts,
+    queryFn: fetchAllDrafts,
   });
 
   return (
@@ -89,7 +92,7 @@ function DraftsPage() {
       {data && data.emails.length > 0 && (
         <div className="mt-8">
           <p className="label text-muted-foreground mb-6">
-            {data.emails.length} draft{data.emails.length === 1 ? "" : "s"} from the latest run
+            {data.emails.length} draft{data.emails.length === 1 ? "" : "s"} across all runs
           </p>
           <div className="space-y-8">
             {data.emails.map((email) => {
@@ -113,6 +116,18 @@ function DraftsPage() {
                     }
                     invalidateKeys={["drafts", "account"]}
                   />
+                  {account && (
+                    <div className="mt-4">
+                      <Link
+                        to="/accounts/$id"
+                        params={{ id: account.id }}
+                        hash="dossier"
+                        className="label border border-border px-3 py-2 hover:border-primary hover:text-primary"
+                      >
+                        Open dossier →
+                      </Link>
+                    </div>
+                  )}
                 </div>
               );
             })}

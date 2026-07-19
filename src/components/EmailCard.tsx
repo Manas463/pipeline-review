@@ -105,11 +105,6 @@ export function EmailCard({
             Signal: {email.signal_used}
           </div>
         )}
-        {email.rewritten_after_critic && (
-          <div className="mt-2">
-            <Pill tone="warn">rewritten</Pill>
-          </div>
-        )}
       </header>
 
       <div className="mt-6">
@@ -134,9 +129,6 @@ export function EmailCard({
               {body || "(empty body)"}
             </pre>
           </div>
-        )}
-        {email.critic_verdict && (
-          <p className="mt-4 label text-muted-foreground">Critic: {email.critic_verdict}</p>
         )}
         {save.error && <p className="mt-3 label text-red-400">{(save.error as Error).message}</p>}
       </div>
