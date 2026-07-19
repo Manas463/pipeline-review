@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Eyebrow, SectionTitle, SourceLinks } from "@/lib/ui";
@@ -16,48 +17,63 @@ type Account = {
   icp_score: number | null;
   why_fit_vs_anchor: string | null;
   sources: unknown;
+  created_at: string;
 };
 
-async function fetchLatestDoneAccounts(): Promise<{ accounts: Account[]; runId: string | null }> {
-  const { data: run, error: runErr } = await supabase
-    .from("runs")
-    .select("id")
-    .eq("status", "done")
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (runErr) throw runErr;
-  if (!run) return { accounts: [], runId: null };
+async function fetchAllAccounts(): Promise<Account[]> {
   const { data, error } = await supabase
     .from("accounts")
-    .select("id, run_id, company, domain, hq_country, icp_score, why_fit_vs_anchor, sources")
-    .eq("run_id", run.id)
-    .order("icp_score", { ascending: false });
+    .select("id, run_id, company, domain, hq_country, icp_score, why_fit_vs_anchor, sources, created_at")
+    .order("created_at", { ascending: false })
+    .limit(10000);
   if (error) throw error;
-  return { accounts: (data as Account[]) ?? [], runId: run.id };
+  return (data as Account[]) ?? [];
 }
 
 function AccountsList() {
+  const [order, setOrder] = useState<"newest" | "oldest">("newest");
   const { data, isLoading, error } = useQuery({
-    queryKey: ["accounts-latest"],
-    queryFn: fetchLatestDoneAccounts,
+    queryKey: ["accounts-all"],
+    queryFn: fetchAllAccounts,
   });
+  const accounts = data
+    ? [...data].sort((a, b) => {
+        const t = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        return order === "newest" ? -t : t;
+      })
+    : [];
 
   return (
     <div>
       <Eyebrow>02 / Accounts</Eyebrow>
-      <SectionTitle>Sourced this run</SectionTitle>
+      <SectionTitle>Sourced across all runs</SectionTitle>
+
+      <div className="mt-6 flex items-center gap-3">
+        <span className="label text-muted-foreground">Sort</span>
+        <button
+          onClick={() => setOrder("newest")}
+          className={`label px-3 py-2 border ${order === "newest" ? "border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+        >
+          Newest first
+        </button>
+        <button
+          onClick={() => setOrder("oldest")}
+          className={`label px-3 py-2 border ${order === "oldest" ? "border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+        >
+          Oldest first
+        </button>
+      </div>
 
       {isLoading && <p className="mt-8 text-muted-foreground">Loading…</p>}
       {error && <p className="mt-8 text-red-400">{(error as Error).message}</p>}
 
-      {data && data.accounts.length === 0 && (
-        <p className="mt-8 text-muted-foreground">No completed run yet.</p>
+      {data && accounts.length === 0 && (
+        <p className="mt-8 text-muted-foreground">No accounts yet.</p>
       )}
 
-      {data && data.accounts.length > 0 && (
+      {accounts.length > 0 && (
         <ul className="mt-8 divide-y divide-dotted divide-border">
-          {data.accounts.map((a) => (
+          {accounts.map((a) => (
             <li key={a.id} className="py-6 grid grid-cols-[80px_1fr_auto] gap-6 items-start">
               <Link
                 to="/accounts/$id"
