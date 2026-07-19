@@ -33,6 +33,14 @@ async function fetchLatestRun(): Promise<Run | null> {
   return (data as Run | null) ?? null;
 }
 
+async function fetchTotals(): Promise<{ accounts: number; emails: number }> {
+  const [{ count: accounts }, { count: emails }] = await Promise.all([
+    supabase.from("accounts").select("id", { count: "exact", head: true }),
+    supabase.from("emails").select("id", { count: "exact", head: true }),
+  ]);
+  return { accounts: accounts ?? 0, emails: emails ?? 0 };
+}
+
 function RunPage() {
   const qc = useQueryClient();
   const [triggering, setTriggering] = useState(false);
@@ -48,6 +56,11 @@ function RunPage() {
       if (r?.status === "running") return 4000;
       return false;
     },
+  });
+
+  const { data: totals } = useQuery({
+    queryKey: ["run-totals"],
+    queryFn: fetchTotals,
   });
 
   useEffect(() => {
@@ -123,19 +136,19 @@ function RunPage() {
         <div>
           <Eyebrow>Last run / Complete</Eyebrow>
           <SectionTitle>Summary</SectionTitle>
-          <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-8">
-            <Stat label="Accounts found" value={latest.accounts_found ?? 0} />
-            <Stat label="Emails generated" value={latest.emails_generated ?? 0} />
-            <Stat label="Contacts not found" value={latest.contacts_not_found ?? 0} />
-            <Link
-              to="/drafts"
-              className="group flex flex-col gap-1 border border-dotted border-border p-4 hover:border-primary"
-            >
-              <span className="label text-muted-foreground group-hover:text-primary">Open drafts</span>
-              <span className="label text-3xl text-foreground group-hover:text-primary" style={{ letterSpacing: "0.04em" }}>
-                →
-              </span>
-            </Link>
+          <div className="mt-6">
+            <p className="label text-muted-foreground mb-4">This run</p>
+            <div className="grid grid-cols-2 gap-8">
+              <Stat label="Accounts found" value={latest.accounts_found ?? 0} />
+              <Stat label="Emails generated" value={latest.emails_generated ?? 0} />
+            </div>
+          </div>
+          <div className="mt-10 border-t border-dotted border-border pt-6">
+            <p className="label text-muted-foreground mb-4">All runs / totals</p>
+            <div className="grid grid-cols-2 gap-8">
+              <Stat label="Accounts found (total)" value={totals?.accounts ?? "—"} />
+              <Stat label="Emails generated (total)" value={totals?.emails ?? "—"} />
+            </div>
           </div>
           <div className="mt-8 flex items-center gap-4">
             <Link
