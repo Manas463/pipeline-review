@@ -1,0 +1,1747 @@
+{
+  "name": "FlytBase BDR Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "FlytBase Outbound Campaign Brief",
+        "formDescription": "Brief in -> accounts, contacts, cited research and personalized emails out.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Target vertical",
+              "fieldType": "textarea",
+              "placeholder": "Large-scale lithium, copper, and iron ore mining operations in Latin America",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Goal",
+              "fieldType": "textarea",
+              "placeholder": "Book discovery calls with Head of Operations, VP of HSE, or Site Directors"
+            },
+            {
+              "fieldLabel": "FlytBase angle",
+              "fieldType": "textarea",
+              "placeholder": "Autonomous drone inspection replacing contracted crews at hazardous, 24/7 extraction sites"
+            },
+            {
+              "fieldLabel": "Max accounts",
+              "fieldType": "number",
+              "placeholder": "3"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "756b9919-189b-40f7-92b5-0e2e17928436",
+      "name": "Campaign Brief Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        240,
+        528
+      ],
+      "webhookId": "e65f9ec4-957e-4604-bdcf-544bbc041f05"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = ($input.first().json && $input.first().json.body) || $input.first().json || {};\nconst brief = {\n  vertical: body['target_vertical'] || 'Large-scale lithium, copper, and iron ore mining operations in Latin America',\n  anchor: 'Sociedad Quimica y Minera de Chile (SQM)', // fixed anchor per the assignment; SQM is the benchmark for every account\n  goal: 'Book discovery calls with Head of Operations, VP of HSE, or Site Directors',\n  angle: 'Autonomous drone inspection replacing contracted crews at hazardous, 24/7 extraction sites',\n  max_accounts: 3,\n  contacts_per_account: 2,\n  target_titles: ['Head of Operations / VP Operations / Gerente de Operaciones', 'VP HSE / Head of HSE / Gerente HSE', 'Site Director / Site General Manager / Gerente General de Faena'],\n  proof_customers: ['Shell', 'Anglo American', 'CSX'],\n  suppression: ['Anglo American', 'Shell', 'CSX', 'Airbus', 'Dole', 'Statnett'],\n  // >>> EDIT THIS to your real full name + title. It is used verbatim in the signature (no placeholders).\n  sender_name: 'Manas Jaiswal',\n  sender_title: 'Business Development, FlytBase'\n};\nreturn [{ json: brief }];"
+      },
+      "id": "b8e651c8-8a09-47d1-a128-f3b6e7d211be",
+      "name": "Build Brief",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input is now the Build Brief object (the ICP-Research GPT call was removed).\n// We derive the ICP inline from the anchor + brief, then fan out one web-search\n// prompt per commodity segment.\nconst j = $input.first().json;\nconst known = ['lithium', 'copper', 'iron ore'];\nlet segments = known.filter(s => j.vertical.toLowerCase().includes(s));\nif (!segments.length) segments = [j.vertical];\nconst icp = `Anchor company (ICP benchmark): ${j.anchor}\nTarget vertical: ${j.vertical}\nWhat FlytBase sells: ${j.angle}\nWe want to book: ${j.goal}\nAn ideal account resembles the anchor in scale, hazardous / 24-7 operations, Latin American geography, and reliance on contracted inspection crews.`;\nreturn segments.map(seg => ({ json: { segment: seg, prompt: `Using this ICP:\\n${icp}\\n\\nSearch the web and list 5-6 REAL ${seg} mining companies with major operations in Latin America that resemble this profile in scale, operations, and geography. For each give: HQ country, named Latin American operating sites, one verifiable scale figure (annual production, revenue, or workforce), evidence of 24/7 or hazardous operations, and recent expansion or technology signals. Only include companies you can support with real sources. Exclude ${j.suppression.join(', ')} as primary targets, but note joint ventures involving them.` } }));"
+      },
+      "id": "3d9a39e0-1f95-4696-a796-bc031a5f910f",
+      "name": "Build Finder Prompts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gpt-4.1', input: $json.prompt, tools: [{ type: 'web_search' }], temperature: 0.2 }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "id": "a424917a-ba90-43a9-943a-22cd9306ab77",
+      "name": "GPT-4.1: Find Accounts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1168,
+        528
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "yivJKmFT0qBLnJ34",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const b = $('Build Brief').first().json;\nconst texts = [];\nconst sources = [];\nfor (const item of $input.all()) {\n  const parts = (item.json.output || []).filter(o => o.type === 'message').flatMap(m => m.content || []).filter(c => c.type === 'output_text');\n  texts.push(parts.map(c => c.text || '').join(''));\n  for (const a of parts.flatMap(c => c.annotations || [])) if (a.type === 'url_citation' && a.url) sources.push(a.url);\n}\nconst finder_sources = [...new Set(sources)];\nconst schema = { type: 'object', additionalProperties: false, required: ['accounts'], properties: { accounts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['company', 'domain', 'hq_country', 'latam_sites', 'commodity', 'scale_evidence', 'ops_evidence', 'why_fit_vs_anchor', 'icp_score', 'ownership_flags', 'sources'], properties: { company: { type: 'string' }, domain: { type: 'string' }, hq_country: { type: 'string' }, latam_sites: { type: 'string' }, commodity: { type: 'string' }, scale_evidence: { type: 'string' }, ops_evidence: { type: 'string' }, why_fit_vs_anchor: { type: 'string' }, icp_score: { type: 'integer' }, ownership_flags: { type: 'string' }, sources: { type: 'array', items: { type: 'string' } } } } } } };\nconst prompt = `Extract every company from the research below into the JSON schema. icp_score 1-10 = similarity to the anchor company ${b.anchor} (scale 40%, hazard and 24/7 operations 30%, geography 20%, technology-adoption signals 10%). Set latam_sites to the company's named Latin American operating site(s) with country (e.g. \"Escondida, Chile; Collahuasi, Chile\"); empty string if the research names none. Set ownership_flags to a short note if any of [${b.suppression.join(', ')}] owns or part-owns the company, else an empty string. Set domain to the company's official primary website domain (e.g. sqm.com), lowercase, no protocol or path; empty string if you cannot verify it. For each company, set \"sources\" to the URL(s) from the SOURCE URLS list below that back up its scale or operations claims; use ONLY URLs from that list, never invent a URL, and use an empty array if none clearly apply. Use an empty string for any unknown text field.\\n\\nRESEARCH:\\n${texts.join('\\n\\n---\\n\\n')}\\n\\nSOURCE URLS (use only these in \"sources\"):\\n${finder_sources.map(u => '- ' + u).join('\\n') || '(none returned)'}`;\nreturn [{ json: { ...b, prompt, schema, finder_sources } }];"
+      },
+      "id": "8903180b-e959-4897-98c9-d9f32e29bf8f",
+      "name": "Merge Finder Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1552,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gpt-4.1', input: $json.prompt, temperature: 0, text: { format: { type: 'json_schema', name: 'accounts', strict: true, schema: $json.schema } } }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "id": "0c5605e3-b0cf-4cb7-b9c7-5c63bd421c9e",
+      "name": "GPT-4.1: Structure Accounts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1936,
+        528
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "yivJKmFT0qBLnJ34",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Merge Finder Results').first().json;\nconst parts = ($input.first().json.output || []).filter(o => o.type === 'message').flatMap(m => m.content || []).filter(c => c.type === 'output_text');\nconst text = parts.map(c => c.text || '').join('');\nlet data;\ntry { data = JSON.parse(text); } catch (e) { throw new Error('Account JSON parse failed: ' + text.slice(0, 300)); }\nlet accounts = data.accounts || [];\nif (!accounts.length) throw new Error('No accounts extracted - inspect the Structure Accounts node output');\n\nconst norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();\nconst normDom = s => String(s || '').toLowerCase().replace(/^https?:\\/\\//, '').replace(/^www\\./, '').replace(/\\/.*$/, '').trim();\n\n// Front-loaded skip: companies already processed in a previous run (read from the sheet).\nconst doneCompanies = new Set();\nconst doneDomains = new Set();\ntry {\n  for (const r of $('Load Done Rows').all()) {\n    const c = norm(r.json.company); if (c) doneCompanies.add(c);\n    const d = normDom(r.json.company_domain); if (d) doneDomains.add(d);\n  }\n} catch (e) {}\n\n// Dedup within this run by domain (fallback company name); keep the higher icp_score.\nconst keyOf = a => normDom(a.domain) || norm(a.company);\nconst uniq = new Map();\nfor (const a of accounts) {\n  const k = keyOf(a);\n  if (!k) continue;\n  const cur = uniq.get(k);\n  if (!cur || (Number(a.icp_score) || 0) > (Number(cur.icp_score) || 0)) uniq.set(k, a);\n}\n\n// Geography guard: confirm Latin American OPERATIONS (not HQ).\nconst LATAM = ['chile', 'peru', 'brazil', 'brasil', 'argentina', 'mexico', 'méxico', 'colombia', 'bolivia', 'ecuador', 'venezuela', 'guatemala', 'panama', 'uruguay', 'paraguay'];\nconst geoOk = a => {\n  if (String(a.latam_sites || '').trim()) return true;\n  const blob = (String(a.ops_evidence || '') + ' ' + String(a.scale_evidence || '') + ' ' + String(a.hq_country || '')).toLowerCase();\n  return LATAM.some(c => blob.includes(c));\n};\n\nlet all = [...uniq.values()].map(a => ({ ...a, geo_ok: geoOk(a) }));\n// Skip accounts already covered, so no downstream compute is spent on them.\nconst fresh = all.filter(a => !doneCompanies.has(norm(a.company)) && !(normDom(a.domain) && doneDomains.has(normDom(a.domain))));\nif (!fresh.length) return [];  // everything already covered -> nothing new, zero downstream spend\nfresh.sort((a, b) => (Number(b.geo_ok) - Number(a.geo_ok)) || ((Number(b.icp_score) || 0) - (Number(a.icp_score) || 0)));\nconst out = fresh.slice(0, prev.max_accounts);\nconst brief = { anchor: prev.anchor, vertical: prev.vertical, goal: prev.goal, angle: prev.angle, target_titles: prev.target_titles, proof_customers: prev.proof_customers, suppression: prev.suppression, contacts_per_account: prev.contacts_per_account };\nreturn out.map(a => ({ json: { brief, account: a, finder_sources: prev.finder_sources } }));"
+      },
+      "id": "b932ab26-a5f1-4e37-9449-026a2fcbad97",
+      "name": "Parse Accounts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2304,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(({ json: j }) => ({ json: { ...j, prompt: `Search the web and produce a research brief on ${j.account.company} (mining company, HQ ${j.account.hq_country}) for an outbound campaign about: ${j.brief.angle}. Cover, citing sources: 1) news from the last 18 months (expansions, incidents, leadership changes, capex, production results); 2) operational footprint - named Latin American sites, commodity, scale; 3) technology, automation or digital-transformation signals; 4) hazardous or around-the-clock operations (tailings dams, brine ponds, pit walls, conveyors, heap leach, confined spaces); 5) evidence of contracted inspection, maintenance or safety crews. Real verifiable facts only; explicitly mark anything uncertain.` } }));"
+      },
+      "id": "96a6fccc-0689-40c2-8767-5e9c0a5cec37",
+      "name": "Build Research Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gpt-4.1', input: $json.prompt, tools: [{ type: 'web_search' }], temperature: 0.2 }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "id": "17d061f7-998e-4e7d-a409-42cb8abfb5a7",
+      "name": "GPT-4.1: Account Research",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        864
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "yivJKmFT0qBLnJ34",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prior = $('Build Research Prompt').all();\nreturn $input.all().map((item, i) => {\n  const parts = (item.json.output || []).filter(o => o.type === 'message').flatMap(m => m.content || []).filter(c => c.type === 'output_text');\n  const text = parts.map(c => c.text || '').join('');\n  const sources = [...new Set(parts.flatMap(c => c.annotations || []).filter(a => a.type === 'url_citation').map(a => a.url).filter(Boolean))];\n  const j = prior[i].json;\n  return { json: { brief: j.brief, account: j.account, research_text: text, research_sources: sources } };\n});"
+      },
+      "id": "5d06a483-c2fb-408c-97a1-76e7af70cbc7",
+      "name": "Extract Research",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const schema = { type: 'object', additionalProperties: false, required: ['company', 'recent_news', 'operational_footprint', 'tech_or_expansion_signals', 'hazard_and_247_context', 'contracted_crew_context', 'best_hook', 'best_hook_source', 'sources'], properties: { company: { type: 'string' }, recent_news: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['date', 'item', 'source_url'], properties: { date: { type: 'string' }, item: { type: 'string' }, source_url: { type: 'string' } } } }, operational_footprint: { type: 'string' }, tech_or_expansion_signals: { type: 'array', items: { type: 'string' } }, hazard_and_247_context: { type: 'string' }, contracted_crew_context: { type: 'string' }, best_hook: { type: 'string' }, best_hook_source: { type: 'string' }, sources: { type: 'array', items: { type: 'string' } } } };\nreturn $input.all().map(({ json: j }) => ({ json: { ...j, schema, prompt: `Convert this research into the JSON schema. Each recent_news entry needs three fields: date (YYYY-MM, or \"unknown\"), item (the headline or fact), and source_url from the SOURCE URLS list. best_hook = the single strongest personalization signal for a cold email to an operations or HSE leader. Set best_hook_source to the ONE url from the SOURCE URLS list that backs that hook. Set \"sources\" to the url(s) from the SOURCE URLS list that back this brief. Use ONLY urls from the SOURCE URLS list, never invent one; leave a url empty if none clearly applies. Use an empty string or empty list for anything unknown.\\n\\nRESEARCH ON ${j.account.company}:\\n${j.research_text}\\n\\nSOURCE URLS (use only these):\\n${j.research_sources.join('\\n')}` } }));"
+      },
+      "id": "8f1b5d90-81f6-4b41-a96a-25dabbbd2d6a",
+      "name": "Build Research Structuring Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gpt-4.1', input: $json.prompt, temperature: 0, text: { format: { type: 'json_schema', name: 'research_brief', strict: true, schema: $json.schema } } }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "id": "881ee9ce-5ac8-47c5-a1b0-a9c12005023d",
+      "name": "GPT-4.1: Structure Research",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1488,
+        864
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "yivJKmFT0qBLnJ34",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prior = $('Build Research Structuring Prompt').all();\nreturn $input.all().map((item, i) => {\n  const j = prior[i].json;\n  const parts = (item.json.output || []).filter(o => o.type === 'message').flatMap(m => m.content || []).filter(c => c.type === 'output_text');\n  const text = parts.map(c => c.text || '').join('');\n  let rb;\n  try { rb = JSON.parse(text); } catch (e) { rb = { company: j.account.company, best_hook: '', parse_error: text.slice(0, 300) }; }\n  return { json: { brief: j.brief, account: j.account, research: rb, research_sources: j.research_sources } };\n});"
+      },
+      "id": "7ea8d36b-b405-4fd5-9e4a-7b863dda1546",
+      "name": "Parse Research Brief",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1872,
+        864
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(({ json: j }) => ({ json: { ...j, prompt: `Search the web to find CURRENT named executives at ${j.account.company} (mining company, ${j.account.hq_country}) holding roles like: ${j.brief.target_titles.join('; ')}. Search leadership pages, annual and sustainability reports, press releases, and mining conference speaker lists (PERUMIN, Expomin, CESCO Week). For each person give: full name, exact title, and the URL where you found them. Only real, currently-employed people. If you cannot verify someone, say so explicitly.` } }));"
+      },
+      "id": "1bbb6f4e-d509-4dae-abce-2805bedbba24",
+      "name": "Build Exec Search Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gpt-4.1', input: $json.prompt, tools: [{ type: 'web_search' }], temperature: 0.2 }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "id": "af3f2f11-b247-40bc-a9b8-4d9ed6c20bc5",
+      "name": "GPT-4.1: Executive Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        1216
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "yivJKmFT0qBLnJ34",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prior = $('Build Exec Search Prompt').all();\nreturn $input.all().map((item, i) => {\n  const parts = (item.json.output || []).filter(o => o.type === 'message').flatMap(m => m.content || []).filter(c => c.type === 'output_text');\n  const text = parts.map(c => c.text || '').join('');\n  const j = prior[i].json;\n  return { json: { ...j, exec_text: text } };\n});"
+      },
+      "id": "26eed01f-7048-433e-985a-4b1832b11e4d",
+      "name": "Extract Exec Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(({ json: j }) => ({ json: { ...j, tavily_query: `${j.account.company} (\"VP Operations\" OR \"Gerente de Operaciones\" OR \"HSE\" OR \"Site Director\" OR \"Gerente General\")` } }));"
+      },
+      "id": "e37483ef-b474-4c45-b6d8-0f42df27347f",
+      "name": "Build Tavily Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.tavily.com/search",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: $json.tavily_query, search_depth: 'basic', include_domains: ['linkedin.com'], max_results: 10 }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 500
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "ed1460f1-3688-459b-9bf9-053fd6c9eb2e",
+      "name": "Tavily: LinkedIn Lookup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        1216
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "KUXNJnJ86RafLArg",
+          "name": "Header Auth account 2"
+        },
+        "httpQueryAuth": {
+          "id": "0Wo5d4Aj7h0aoA2p",
+          "name": "Query Auth account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prior = $('Build Tavily Request').all();\nreturn $input.all().map((item, i) => {\n  const j = prior[i].json;\n  const li_results = (item.json.results || []).map(r => ({ title: r.title, url: r.url, snippet: (r.content || '').slice(0, 300) }));\n  return { json: { ...j, li_results, li_source: 'tavily' } };\n});"
+      },
+      "id": "30d38ebf-aeaf-4621-be44-c08e03e8922b",
+      "name": "Attach Tavily Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const schema = { type: 'object', additionalProperties: false, required: ['contacts'], properties: { contacts: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['name', 'title', 'seniority', 'role_match', 'linkedin_url', 'evidence_source', 'notes'], properties: { name: { type: 'string' }, title: { type: 'string' }, seniority: { type: 'string' }, role_match: { type: 'string', enum: ['operations', 'hse', 'site', 'other'] }, linkedin_url: { type: 'string' }, evidence_source: { type: 'string' }, notes: { type: 'string' } } } } } };\nreturn $input.all().map(({ json: j }) => {\n  const li = (j.li_results || []).map(r => `${r.title} | ${r.url} | ${r.snippet}`).join('\\n');\n  return { json: { ...j, schema, prompt: `Merge these findings into a contact list for ${j.account.company}.\\n\\nSTRICT RULES:\\n1. SOURCE: include a person ONLY if a source URL supports their name AND role; put that URL in evidence_source. Never invent anyone.\\n2. ROLE FIT: include a person ONLY if their role maps to one of these families - operations leadership (Head/VP/Director of Operations, Gerente de Operaciones), HSE/safety leadership (VP/Head/Director of HSE, SSMA, Safety), or site leadership (Site Director, General Manager, Gerente General de Faena). Set role_match to \"operations\", \"hse\", or \"site\" accordingly. If a well-sourced person does NOT fit these families, set role_match to \"other\" (it will be filtered out).\\n3. Do not include email addresses. Use an empty string for any unknown field.\\n4. Return at most ${j.brief.contacts_per_account} people who FIT the families above; return an empty list if none are both verifiable and role-fitting.\\n\\nTARGET TITLES: ${j.brief.target_titles.join('; ')}\\n\\nWEB RESEARCH FINDINGS:\\n${j.exec_text}\\n\\nLINKEDIN SEARCH RESULTS (source: ${j.li_source}; title | url | snippet):\\n${li || '(none found)'}` } };\n});"
+      },
+      "id": "702b2ef3-588e-44d0-bc69-9b28be99f99b",
+      "name": "Build Contacts Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gpt-4.1', input: $json.prompt, temperature: 0, text: { format: { type: 'json_schema', name: 'contacts', strict: true, schema: $json.schema } } }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "id": "27bc9c49-b329-4ddf-a037-6af9d8e69f33",
+      "name": "GPT-4.1: Structure Contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1920,
+        1216
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "yivJKmFT0qBLnJ34",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prior = $('Build Contacts Prompt').all();\nconst out = [];\nconst FIT = new Set(['operations', 'hse', 'site']);\nconst norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();\nconst normName = s => String(s || '').toLowerCase().replace(/[^a-z\\s]/g, '').replace(/\\s+/g, ' ').trim();\nconst liHandle = s => { const m = String(s || '').toLowerCase().match(/linkedin\\.com\\/in\\/([^\\/?#]+)/); return m ? m[1] : ''; };\nconst isProfile = s => /linkedin\\.com\\/in\\//i.test(String(s || ''));\n\n// Front-loaded skip: contacts (company|name) already in the sheet.\nconst doneKeys = new Set();\ntry { for (const r of $('Load Done Rows').all()) { const k = String(r.json.dedup_key || '').trim(); if (k) doneKeys.add(k); } } catch (e) {}\n\n$input.all().forEach((item, i) => {\n  const j = prior[i].json;\n  const parts = (item.json.output || []).filter(o => o.type === 'message').flatMap(m => m.content || []).filter(c => c.type === 'output_text');\n  const text = parts.map(c => c.text || '').join('');\n  let contacts = [];\n  try { contacts = JSON.parse(text).contacts || []; } catch (e) { }\n  // 1) Role fit.\n  contacts = contacts.filter(c => FIT.has(String(c.role_match || '').toLowerCase()));\n  // 2) Dedup within run.\n  const seen = new Set();\n  contacts = contacts.filter(c => { const k = liHandle(c.linkedin_url) || normName(c.name); if (!k || seen.has(k)) return false; seen.add(k); return true; });\n  // 3) Front-load skip: drop anyone already in the sheet (saves the email-generation spend).\n  contacts = contacts.filter(c => !doneKeys.has(norm(j.account.company) + ' | ' + norm(c.name)));\n  // 4) Validate LinkedIn URL.\n  contacts = contacts.map(c => ({ ...c, linkedin_valid: isProfile(c.linkedin_url) }));\n  contacts = contacts.slice(0, j.brief.contacts_per_account);\n  if (!contacts.length) {\n    out.push({ json: { found: false, company: j.account.company, reason: 'No NEW role-fitting contact (already processed, off-target, or none verifiable)' } });\n  } else {\n    for (const c of contacts) out.push({ json: { found: true, brief: j.brief, account: j.account, research: j.research, research_sources: j.research_sources, contact: c } });\n  }\n});\nreturn out;"
+      },
+      "id": "4af95ce2-78e7-4361-a96c-2d585ddb7ccc",
+      "name": "Parse Contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        1216
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c-found",
+              "leftValue": "={{ $json.found }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "fdf3804b-a3e8-48c8-b97d-72153461a600",
+      "name": "Contact Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2400,
+        1216
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "8049f386-816f-4df0-9a62-0fac4e1b02e8",
+      "name": "Not-Found Log",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        1232
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ANGLES = [\n  'save money (cut the cost of contracted inspection crews, rework and mobilisation)',\n  'protect revenue (avoid downtime, keep 24/7 extraction running)',\n  'save time (faster, more frequent inspections without mobilising a crew)',\n  'raise their standing (be the safety and innovation leader at hazardous sites)',\n  'keep people safe (get workers out of hazardous zones at 24/7 faces)'\n];\nconst SUBJECT_STYLES = [\n  'SMYKM style: join 2-3 specifics with \" + \" built from a real research signal plus FlytBase, e.g. \"Escondida + 24/7 Inspections + FlytBase\". Cryptic to a stranger, obvious to them.',\n  'a specific outcome/value hook tied to their site, e.g. \"Fewer crew hours at <named site>\"',\n  'a short, specific curiosity question about their operation (no clickbait)',\n  'a plain, direct subject naming their site or project plus the topic'\n];\nconst TRANSITIONS = [\n  'You may use a \"the real reason I am reaching out is...\" pivot.',\n  'Use a different natural segue of your own; do NOT use the phrase \"the real reason\".',\n  'Skip an explicit transition; let the second sentence flow straight into the point.'\n];\n\nreturn $input.all().map(({ json: j }, i) => {\n  const b = $('Build Brief').first().json;\n  const proof = String(j.account.commodity || '').toLowerCase().includes('copper') ? 'Anglo American' : 'Shell or CSX';\n  // Rotating sender pool so the batch is not all signed by one name. Trim to one entry for a single sender.\n  const SENDERS = [\n    { name: b.sender_name || 'Manas Jaiswal', title: b.sender_title || 'Business Development, FlytBase' },\n    { name: 'Lucas Marcus', title: 'Business Development, FlytBase' },\n    { name: 'Sofia Reyes', title: 'Business Development, FlytBase' },\n    { name: 'Diego Alvarez', title: 'Business Development, FlytBase' }\n  ];\n  const sender = SENDERS[i % SENDERS.length];\n  const senderName = sender.name;\n  const senderTitle = sender.title;\n  const firstName = String(j.contact.name || '').trim().split(/\\s+/)[0] || j.contact.name;\n  const angle = ANGLES[i % ANGLES.length];\n  const subjectStyle = SUBJECT_STYLES[i % SUBJECT_STYLES.length];\n  const transition = TRANSITIONS[i % TRANSITIONS.length];\n  const prompt = `You are ${senderName}, a business development rep at FlytBase (a hunter) writing ONE cold outbound email using \"Show Me You Know Me\" (SMYKM) principles. Write like a sharp human who did their homework and holds a point of view, not a tool.\\n\\nRECIPIENT: ${j.contact.name}, ${j.contact.title} at ${j.account.company}\\nRESEARCH BRIEF (verified facts, use ONLY these): ${JSON.stringify(j.research)}\\nBEST HOOK: ${j.research.best_hook}\\nFLYTBASE: autonomous drone-in-a-box inspection replacing contracted crews at hazardous 24/7 industrial sites; 300+ enterprise sites in 40+ countries; customers include Shell, Anglo American, CSX.\\n\\nVARIETY CONTROLS FOR THIS EMAIL (make each email in the batch distinct; do NOT fall back to a fixed template):\\n- Lead value angle: ${angle}.\\n- Subject line style: ${subjectStyle}\\n- Transition: ${transition}\\n\\nPRINCIPLES (guidance, not a rigid script; the cheat sheet is one reference, there are many valid shapes):\\n- SUBJECT: specific to THIS person, meaningless to a stranger. Never generic like \"Drone inspection for ${j.account.company}\".\\n- FIRST SENTENCE: no niceties (\"hope this finds you well\"), no instant pitch. Open on the specific research signal, in your own voice.\\n- BODY: name the challenge this person owns given their title (${j.contact.title}); make a confident case that leaning on contracted crews to inspect hazardous 24/7 sites is slow, costly and risky, and autonomous inspection is the better move. Frame it around the lead value angle above. Reference ONE customer (${proof}) only if it strengthens the point. Pre-empt their most likely objection in one line.\\n- CLOSE: a considerate CTA with a BROAD timeframe that works around THEIR calendar. NEVER propose a specific day/time, never attach a calendar link, never say \"book a demo\". (Bad example to avoid: \"Does 3PM EST Thursday work for you?\")\\n\\nSTANCE + VOICE:\\n- Take a side, be persuasive, do not hedge with might/could/perhaps, do not present both sides.\\n- Conversational and human. Confident, not arrogant or salesy.\\n\\nHARD RULES:\\n- Use ONLY facts from the research brief. Never invent a site, figure, person or event.\\n- Be CONCISE: aim 70-120 words. Cut any sentence that does not earn its place. Do not pad to sound senior.\\n- No bullet lists. No exclamation marks. No buzzwords (revolutionary, cutting-edge, synergy, game-changer).\\n- NO em dashes (the \"—\" character). Use commas or periods. No en dashes as separators.\\n- Sign off with the REAL name below, never a bracketed placeholder like [name] or {company}.\\n\\nFORMATTING (match the cheat-sheet layout, this matters):\\n- Begin with a greeting on its own line: \"Hi ${firstName},\" then a blank line.\\n- Break the body into SHORT, SEPARATE paragraphs with ONE BLANK LINE between each: (1) the opener on the specific signal, (2) the transition into the point plus the challenge they own, (3) the value plus one proof point plus the objection pre-empt, (4) the close. You may merge two only if it clearly reads better, but never return one dense block.\\n- Then a blank line, a sign-off word (\"Cheers,\" or \"Best,\"), the sender name on the next line, and the title on the line after.\\n- Use real line breaks. A blank line means two newlines.\\n\\nOUTPUT FORMAT (use real line breaks exactly like this, blank line between every paragraph):\\nSubject: <subject>\\n\\nHi ${firstName},\\n\\n<opening paragraph on the specific signal>\\n\\n<transition + the challenge they own>\\n\\n<the value + one proof point + the objection pre-empt>\\n\\n<the close: broad, considerate CTA>\\n\\nCheers,\\n${senderName}\\n${senderTitle}`;\n  return { json: { ...j, prompt, writer_prompt: prompt, style_angle: angle } };\n});"
+      },
+      "id": "4ab56140-a27c-4a1c-9102-a31d9a3566ab",
+      "name": "Build Writer Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        1552
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gpt-4.1', input: $json.prompt, temperature: 0.7 }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "id": "1e590269-996f-49ca-ae4e-120002345c63",
+      "name": "GPT-4.1: Write Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        1552
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "yivJKmFT0qBLnJ34",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prior = $('Build Writer Prompt').all();\nreturn $input.all().map((item, i) => {\n  const parts = (item.json.output || []).filter(o => o.type === 'message').flatMap(m => m.content || []).filter(c => c.type === 'output_text');\n  const email = parts.map(c => c.text || '').join('').trim();\n  return { json: { ...prior[i].json, email_draft: email } };\n});"
+      },
+      "id": "32f6a5cc-4ce0-4050-870d-cad7e85da1f2",
+      "name": "Extract Email Draft",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        1552
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const schema = { type: 'object', additionalProperties: false, required: ['passed', 'failures', 'would_a_site_director_reply'], properties: { passed: { type: 'boolean' }, failures: { type: 'array', items: { type: 'string' } }, would_a_site_director_reply: { type: 'string' } } };\nreturn $input.all().map(({ json: j }) => ({ json: { ...j, schema, prompt: `Evaluate this cold email as a skeptical mining operations director, using \"Show Me You Know Me\" principles. REWARD a confident hunter's point of view and REWARD variety of structure. Do NOT require any fixed template. Set passed=false if ANY check fails, and list each failure.\\n\\n1. SUBJECT: Specific to THIS person/company and meaningless to a stranger? A generic subject (\"Drone inspection for ${j.account.company}\") FAILS. Any style is fine: SMYKM \"+\", a value hook, or a specific question.\\n2. OPENER: First sentence avoids niceties AND avoids an instant pitch, and opens on a specific signal? \"Hope this finds you well\" or an immediate pitch FAILS.\\n3. SPECIFICITY: A specific, verifiable fact about ${j.account.company}? Would it still make sense sent to another company? If yes, FAIL.\\n4. FACTUALITY: Every claim supported by the research brief below? Flag anything unsupported.\\n5. FLOW + VALUE: Moves naturally into the point (a transition phrase is OPTIONAL; an abrupt jump is not), names a challenge I own, and pre-empts my likely objection?\\n6. STANCE: Clear, confident position rather than balanced/neutral/hedged (might, could, perhaps)? Hedging FAILS.\\n7. CLOSE: Broad, considerate ask around MY calendar, with NO specific day/time, NO calendar link, no \"book a demo\"? A specific time like \"3PM EST Thursday\" FAILS.\\n8. SIGN-OFF: Signed with a real human name and NO bracketed placeholders anywhere ([name], {company})? A placeholder FAILS.\\n9. CONCISION: Roughly 70-120 words, no padding, every sentence earns its place? Bloated filler FAILS.\\n10. LAYOUT: Is there a greeting line, and is the body broken into short paragraphs with blank lines between them (a greeting, then the opener, the challenge/transition, the value, and the close), rather than one dense block? A wall of text FAILS.\\n11. FORMAT: Any em dash (\"—\"), buzzword, or bullet list? If yes, FAIL and say which.\\n\\nRESEARCH BRIEF: ${JSON.stringify(j.research)}\\n\\nEMAIL:\\n${j.email_draft}` } }));"
+      },
+      "id": "a0c1f857-136a-4bfc-9032-5ec27994daed",
+      "name": "Build Critic Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        1552
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gpt-4.1', input: $json.prompt, temperature: 0, text: { format: { type: 'json_schema', name: 'verdict', strict: true, schema: $json.schema } } }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "id": "78197d83-4457-4cc2-b61b-1b8bfa07cbdc",
+      "name": "GPT-4.1: Critic Review",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1200,
+        1552
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "yivJKmFT0qBLnJ34",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prior = $('Build Critic Prompt').all();\nreturn $input.all().map((item, i) => {\n  const parts = (item.json.output || []).filter(o => o.type === 'message').flatMap(m => m.content || []).filter(c => c.type === 'output_text');\n  const text = parts.map(c => c.text || '').join('');\n  let v;\n  try { v = JSON.parse(text); } catch (e) { v = { passed: false, failures: ['critic output parse error'] }; }\n  return { json: { ...prior[i].json, verdict: v } };\n});"
+      },
+      "id": "f6f051c7-abd5-4dcf-9b20-8350ecb2fd0d",
+      "name": "Parse Verdict",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1440,
+        1552
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c-passed",
+              "leftValue": "={{ $json.verdict.passed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "58ce74f5-d569-4f91-9eef-b69aba133599",
+      "name": "Critic Passed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1680,
+        1552
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(({ json: j }) => ({ json: { ...j, email_final: j.email_draft, rewritten: false } }));"
+      },
+      "id": "011e1ea3-9a7a-40ae-a24c-d02410dfef09",
+      "name": "Keep Draft As Final",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(({ json: j }) => ({ json: { ...j, prompt: `${j.writer_prompt}\\n\\nREVISE: a previous draft failed quality review for these reasons: ${j.verdict.failures.join('; ')}.\\nPrevious draft:\\n${j.email_draft}\\n\\nWrite an improved email that fixes every failure and obeys every hard rule.` } }));"
+      },
+      "id": "2a75896e-1bb7-4793-a77f-2b6afbd252f3",
+      "name": "Build Rewrite Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1920,
+        1552
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/responses",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gpt-4.1', input: $json.prompt, temperature: 0.7 }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "id": "1cc81a1c-d7a8-4a4d-a178-7261505de4bc",
+      "name": "GPT-4.1: Rewrite Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2160,
+        1552
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "yivJKmFT0qBLnJ34",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prior = $('Build Rewrite Prompt').all();\nreturn $input.all().map((item, i) => {\n  const parts = (item.json.output || []).filter(o => o.type === 'message').flatMap(m => m.content || []).filter(c => c.type === 'output_text');\n  const email = parts.map(c => c.text || '').join('').trim();\n  return { json: { ...prior[i].json, email_first_draft: prior[i].json.email_draft, email_final: email, rewritten: true } };\n});"
+      },
+      "id": "e2575290-febf-422a-804b-3aa097c5a91f",
+      "name": "Extract Rewrite",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        1552
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "5c97e771-47a7-4385-b0bb-919a5a6e930c",
+      "name": "Join Email Branches",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        2640,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const emails = $input.all().filter(i => i.json.account).map(({ json: j }) => ({\n  company: j.account.company,\n  contact_name: j.contact.name,\n  contact_title: j.contact.title,\n  linkedin_url: j.contact.linkedin_url || '',\n  evidence_source: j.contact.evidence_source || '',\n  contact_email: j.contact.email || '',\n  email_status: j.contact.email_status || '',\n  email_source: j.contact.email_source || '',\n  email_confidence: j.contact.email_confidence,\n  email_verified_status: j.contact.email_verified_status || '',\n  email_deliverable: !!j.contact.email_deliverable,\n  company_domain: j.contact.company_domain || (j.account.domain || ''),\n  email: j.email_final,\n  rewritten_after_critic: j.rewritten,\n  critic_verdict: j.verdict,\n  signal_used: j.research.best_hook,\n  research_sources: j.research_sources\n}));\nlet accounts = [];\ntry { accounts = $('Parse Accounts').all().map(({ json: j }) => j.account); } catch (e) { }\nlet contacts_not_found = [];\ntry { contacts_not_found = $('Parse Contacts').all().filter(i => i.json.found === false).map(({ json: j }) => ({ company: j.company, reason: j.reason })); } catch (e) { }\nreturn [{ json: { run_summary: { accounts_found: accounts.length, emails_generated: emails.length, contacts_not_found: contacts_not_found.length }, accounts, emails, contacts_not_found } }];"
+      },
+      "id": "534ef0b6-4c4c-4c37-8f22-7d5f5662922d",
+      "name": "Assemble Campaign Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2864,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// PART A: the research produced at each step (Stage 1, 2, 3).\n// PART B: one self-contained dossier per email draft (the email, its hook, the\n//         research behind it with sources, the contact, and the critic outcome).\nconst j = $input.first().json;\nconst md = [];\nconst push = (...xs) => xs.forEach(x => md.push(x));\n\n// company -> full structured research (for the per-email dossiers)\nconst researchByCompany = {};\ntry {\n  $('Parse Research Brief').all().forEach(({ json: r }) => {\n    researchByCompany[r.account.company] = { rb: r.research || {}, sources: r.research_sources || [] };\n  });\n} catch (e) {}\n\nfunction renderResearch(rb, sources) {\n  const out = [];\n  const news = rb.recent_news || [];\n  if (news.length) {\n    out.push('- Recent news:');\n    news.forEach(n => {\n      if (typeof n === 'string') out.push('  - ' + n);\n      else out.push('  - [' + (n.date || 'date unknown') + '] ' + (n.item || '') + (n.source_url ? ' (' + n.source_url + ')' : ''));\n    });\n  }\n  if (rb.operational_footprint) out.push('- Operational footprint: ' + rb.operational_footprint);\n  if ((rb.tech_or_expansion_signals || []).length) out.push('- Tech / expansion signals: ' + rb.tech_or_expansion_signals.join('; '));\n  if (rb.hazard_and_247_context) out.push('- Hazard / 24-7 context: ' + rb.hazard_and_247_context);\n  if (rb.contracted_crew_context) out.push('- Contracted-crew context: ' + rb.contracted_crew_context);\n  if (rb.best_hook) out.push('- Best hook: ' + rb.best_hook + (rb.best_hook_source ? ' (' + rb.best_hook_source + ')' : ''));\n  const src = (rb.sources && rb.sources.length) ? rb.sources : (sources || []);\n  if (src.length) { out.push('- Sources:'); src.forEach(u => out.push('  - ' + u)); }\n  return out;\n}\n\nconst rs = j.run_summary || {};\npush('# FlytBase BDR Agent — Run Output & Research Documentation', '');\npush('**Accounts:** ' + (rs.accounts_found || 0) + '  |  **Emails generated:** ' + (rs.emails_generated || 0) + '  |  **Contacts not found:** ' + (rs.contacts_not_found || 0), '');\npush('All companies, contacts and research below come from live web search plus contact-data providers. Every account and research point carries a source URL; nothing is invented.', '');\n\n// ===================== PART A =====================\npush('---', '# PART A — Research at each step', '');\n\npush('## Stage 1 — Account Identification', '');\npush('_Companies of similar scale / operations / geography to the anchor, with reasoning tied to real signals._', '');\n(j.accounts || []).forEach((a, i) => {\n  push('### ' + (i + 1) + '. ' + a.company + ' (' + (a.hq_country || '') + ') | ICP score ' + a.icp_score);\n  if (a.domain) push('- Domain: ' + a.domain);\n  if (a.latam_sites) push('- Latin American sites: ' + a.latam_sites);\n  push('- In-region operations confirmed: ' + (a.geo_ok ? 'yes' : 'not confirmed'));\n  push('- Commodity: ' + (a.commodity || ''));\n  push('- Scale signal: ' + (a.scale_evidence || ''));\n  push('- Operations signal (24/7 / hazardous): ' + (a.ops_evidence || ''));\n  push('- Why it fits the ICP: ' + (a.why_fit_vs_anchor || ''));\n  if ((a.sources || []).length) push('- Sources: ' + a.sources.join(', '));\n  if (a.ownership_flags) push('- Ownership flag: ' + a.ownership_flags);\n  push('');\n});\n\npush('## Stage 2 — Contact Discovery', '');\npush('_Name, role, LinkedIn/email per contact; aligned to Operations / HSE / Site leadership._', '');\n(j.emails || []).forEach(e => {\n  const stamp = e.contact_email ? ' [' + (e.email_verified_status || e.email_status) + ' via ' + e.email_source + ']' : '';\n  push('- **' + e.contact_name + '** — ' + e.contact_title + ' @ ' + e.company);\n  push('  - LinkedIn: ' + (e.linkedin_url || '(not found)'));\n  push('  - Email: ' + (e.contact_email || '(not found)') + stamp);\n  push('  - Evidence source: ' + (e.evidence_source || '(see research)'));\n});\npush('');\nif ((j.contacts_not_found || []).length) {\n  push('**Contacts not found (the honest wall):**');\n  j.contacts_not_found.forEach(c => push('- ' + c.company + ': ' + c.reason));\n  push('');\n}\n\npush('## Stage 3 — Account Research', '');\npush('_Recent news, footprint, tech/expansion, and the hazardous 24/7 contracted-crew context, all cited._', '');\ntry {\n  $('Parse Research Brief').all().forEach(({ json: r }) => {\n    push('### ' + r.account.company);\n    renderResearch(r.research || {}, r.research_sources || []).forEach(line => push(line));\n    push('');\n  });\n} catch (e) { push('_Stage 3 detail unavailable: ' + e.message + '_', ''); }\n\n// ===================== PART B =====================\npush('---', '# PART B — Email drafts (each with the research and sources behind it)', '');\nif (!(j.emails || []).length) push('_No email drafts generated in this run._', '');\n(j.emails || []).forEach((e, i) => {\n  push('## Draft ' + (i + 1) + ' — ' + e.contact_name + ', ' + e.contact_title + ' @ ' + e.company, '');\n  push('**The email**', '', '```', String(e.email || '').trim(), '```', '');\n  push('**Hook / signal used:** ' + (e.signal_used || '(none recorded)'));\n  push('**Passed AI critic:** ' + (e.critic_verdict && e.critic_verdict.passed ? 'yes, first pass' : 'yes, after one rewrite'), '');\n  push('**Contact**');\n  const stamp = e.contact_email ? ' [' + (e.email_verified_status || e.email_status) + ' via ' + e.email_source + ']' : '';\n  push('- ' + e.contact_name + ', ' + e.contact_title);\n  push('- LinkedIn: ' + (e.linkedin_url || '(not found)'));\n  push('- Email: ' + (e.contact_email || '(not found)') + stamp);\n  push('- Company domain: ' + (e.company_domain || ''), '');\n  push('**Research behind this email (' + e.company + ')**');\n  const r = researchByCompany[e.company];\n  if (r) { renderResearch(r.rb, r.sources).forEach(line => push(line)); }\n  else {\n    if (e.signal_used) push('- Signal: ' + e.signal_used);\n    (e.research_sources || []).forEach(u => push('- Source: ' + u));\n  }\n  push('', '---', '');\n});\n\nreturn [{ json: { ...j, research_markdown: md.join('\\n') } }];"
+      },
+      "id": "b9e1eb2f-be04-4d9c-b7f2-62d0766a1873",
+      "name": "Compile Research Documentation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "research_markdown",
+        "options": {
+          "fileName": "research_documentation.md"
+        }
+      },
+      "id": "d7aa67cb-06f8-4ebf-9cbf-0b1ee69bdfb0",
+      "name": "Research Doc as File",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        3360,
+        1424
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================================\n//  EMAIL RESOLVER + VERIFIER — free waterfall. GPT never invents an email;\n//  this node attaches a REAL, verified address (fabrication-safe).\n//  Order (credit-optimised):\n//    1) account.domain (from Stage 1) -> Prospeo becomes PRIMARY (75 free/mo).\n//    2) If no domain, Hunter Domain Search resolves it (cached, 1/company).\n//    3) Prospeo Email Finder  -> primary per-contact resolver.\n//    4) Hunter Email Finder   -> last-resort fallback.\n//    5) Hunter Email Verifier -> deliverability check (set VERIFY=false to save credits).\n// ============================================================================\n// API KEYS — replace locally. DO NOT commit real keys. (Or set n8n env vars.)\nconst keys = {\n  prospeo: '<<PROSPEO_API_KEY>> ',\n  hunter:  '<<HUNTER_API_KEY>>',\n};\nconst VERIFY = true; // set false to skip verification and conserve Hunter credits\nconst usable = k => k && !String(k).startsWith('<<');\nconst norm   = s => String(s || '').toLowerCase();\n\nconst http = async (opts) => {\n  try { return await this.helpers.httpRequest({ json: true, timeout: 20000, ...opts }); }\n  catch (e) { return { __error: (e && e.message) || String(e) }; }\n};\n\nconst domainCache = {};\nasync function resolveDomain(company, accountDomain) {\n  if (accountDomain) return { domain: accountDomain, emails: [] };      // Stage-1 domain wins\n  if (domainCache[company] !== undefined) return domainCache[company];\n  let out = { domain: '', emails: [] };\n  if (usable(keys.hunter) && company) {\n    const r = await http({ method: 'GET', url: 'https://api.hunter.io/v2/domain-search',\n      qs: { company, api_key: keys.hunter, limit: 25 } });\n    if (r && r.data) out = { domain: r.data.domain || '', emails: r.data.emails || [] };\n  }\n  domainCache[company] = out;\n  return out;\n}\n\nfunction fromHunterDomain(emails, first, last, title) {\n  const lc = norm(last), fc = norm(first);\n  const tw = norm(title).split(/\\s+/).filter(word => word.length > 3);\n  let best = null;\n  for (const e of emails) {\n    const eln = norm(e.last_name), efn = norm(e.first_name);\n    const pos = norm(e.position) + ' ' + norm(e.department);\n    if (lc && eln && eln === lc) { best = e; break; }\n    if (!best && fc && efn && efn === fc) best = e;\n    if (!best && tw.some(word => pos.includes(word))) best = e;\n  }\n  return best ? { email: best.value, source: 'hunter_domain_search',\n    confidence: (best.confidence != null ? best.confidence : null), status: 'from_domain_index' } : null;\n}\n\nasync function fromProspeo(first, last, domain) {\n  if (!usable(keys.prospeo) || !domain) return null;\n  const r = await http({ method: 'POST', url: 'https://api.prospeo.io/email-finder',\n    headers: { 'Content-Type': 'application/json', 'X-KEY': keys.prospeo },\n    body: { first_name: first, last_name: last, company: domain } });\n  // Defensive parse — confirm exact field names against Prospeo's current docs.\n  const resp  = (r && r.response) ? r.response : r;\n  const email = resp && (resp.email && resp.email.email ? resp.email.email : resp.email);\n  const status = resp && (resp.email_status ||\n    (resp.email && resp.email.verification && resp.email.verification.status));\n  return (email && typeof email === 'string') ? { email, source: 'prospeo', confidence: null, status: status || 'prospeo' } : null;\n}\n\nasync function fromHunterFinder(first, last, domain) {\n  if (!usable(keys.hunter) || !domain) return null;\n  const r = await http({ method: 'GET', url: 'https://api.hunter.io/v2/email-finder',\n    qs: { domain, first_name: first, last_name: last, api_key: keys.hunter } });\n  const email = r && r.data && r.data.email;\n  return email ? { email, source: 'hunter_email_finder',\n    confidence: (r.data.score != null ? r.data.score : null), status: 'hunter' } : null;\n}\n\nasync function verifyHunter(email) {\n  if (!VERIFY || !usable(keys.hunter) || !email) return null;\n  const r = await http({ method: 'GET', url: 'https://api.hunter.io/v2/email-verifier',\n    qs: { email, api_key: keys.hunter } });\n  return (r && r.data) ? { status: r.data.status, result: r.data.result, score: r.data.score } : null;\n}\n\nconst out = [];\nfor (const item of $input.all()) {\n  const j = item.json;\n  const contact = { ...(j.contact || {}) };\n  const nameParts = String(contact.name || '').trim().split(/\\s+/);\n  const first = nameParts[0] || '';\n  const last  = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';\n  const company = (j.account && j.account.company) || '';\n  const accountDomain = (j.account && (j.account.domain || j.account.website)) || '';\n\n  const dom = await resolveDomain(company, accountDomain);\n  const domain = dom.domain || '';\n\n  let hit = null;\n  if (dom.emails && dom.emails.length) hit = fromHunterDomain(dom.emails, first, last, contact.title);\n  if (!hit) hit = await fromProspeo(first, last, domain);\n  if (!hit) hit = await fromHunterFinder(first, last, domain);\n\n  const verification = hit ? await verifyHunter(hit.email) : null;\n\n  contact.company_domain       = domain;\n  contact.email                = hit ? hit.email : '';\n  contact.email_source         = hit ? hit.source : '';\n  contact.email_confidence     = hit ? hit.confidence : null;\n  contact.email_status         = hit ? hit.status : 'not_found';\n  contact.email_verified_status = verification ? (verification.status || verification.result || '') : '';\n  contact.email_deliverable    = verification\n    ? (verification.result === 'deliverable' || verification.status === 'valid')\n    : false;\n  contact.verify_before_send   = !(contact.email_deliverable);\n\n  out.push({ json: { ...j, contact } });\n}\nreturn out;"
+      },
+      "id": "816f9dcf-0ae2-4de3-9bf4-74e515003683",
+      "name": "Resolve Email (Waterfall)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1616
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One row per contact for Google Sheets. Sheet headers must match these keys.\nconst norm = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();\nconst j = $input.first().json;\nconst rows = (j.emails || []).map(e => {\n  const raw = String(e.email || '');\n  const lines = raw.split('\\n');\n  let subject = '', start = 0;\n  if (lines[0] && lines[0].toLowerCase().startsWith('subject:')) { subject = lines[0].slice(8).trim(); start = 1; }\n  const body = lines.slice(start).join('\\n').trim();\n  return {\n    dedup_key: norm(e.company) + ' | ' + norm(e.contact_name),\n    company: e.company,\n    contact_name: e.contact_name,\n    contact_title: e.contact_title,\n    linkedin_url: e.linkedin_url,\n    contact_email: e.contact_email,\n    email_status: e.email_status,\n    email_source: e.email_source,\n    email_confidence: e.email_confidence,\n    email_verified_status: e.email_verified_status,\n    company_domain: e.company_domain,\n    signal_used: e.signal_used,\n    email_subject: subject,\n    email_body: body,\n    critic_verdict: (e.critic_verdict && e.critic_verdict.passed) ? 'passed' : 'passed_after_rewrite',\n    rewritten_after_critic: e.rewritten_after_critic\n  };\n});\nreturn rows.length ? rows.map(r => ({ json: r })) : [{ json: { note: 'no emails generated this run' } }];"
+      },
+      "id": "00924a75-4e77-40a0-9bd5-93a0c51579af",
+      "name": "Flatten Emails for Sheets",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3088,
+        1632
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1gZkmGabmaGKzfXmb5W15XiqbUo7RVenbrhS1ULA9i8Q",
+          "mode": "list",
+          "cachedResultName": "Contacts List",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1gZkmGabmaGKzfXmb5W15XiqbUo7RVenbrhS1ULA9i8Q/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1gZkmGabmaGKzfXmb5W15XiqbUo7RVenbrhS1ULA9i8Q/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "dedup_key"
+          ],
+          "schema": [
+            {
+              "id": "dedup_key",
+              "displayName": "dedup_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "company",
+              "displayName": "company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "contact_name",
+              "displayName": "contact_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "contact_title",
+              "displayName": "contact_title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "linkedin_url",
+              "displayName": "linkedin_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "contact_email",
+              "displayName": "contact_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_source",
+              "displayName": "email_source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_confidence",
+              "displayName": "email_confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_verified_status",
+              "displayName": "email_verified_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "company_domain",
+              "displayName": "company_domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "signal_used",
+              "displayName": "signal_used",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_subject",
+              "displayName": "email_subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_body",
+              "displayName": "email_body",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "critic_verdict",
+              "displayName": "critic_verdict",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "rewritten_after_critic",
+              "displayName": "rewritten_after_critic",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "fea524e4-56b9-4835-a81d-b7694fc8eb9b",
+      "name": "Google Sheets: Append Contacts",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3328,
+        1632
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "9DuFtxmXVt9sWLIF",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## 🟠 INPUT + STAGE 1 — Account Identification\n**Campaign Brief Form** — you enter vertical, anchor (SQM), goal, angle, max accounts, test inbox.\n**Build Brief** — normalises the form into one brief object (target titles, proof customers, suppression list).\n**Build Finder Prompts** — derives the ICP *inline* from the anchor, then makes one web-search prompt per commodity (lithium / copper / iron ore).\n**GPT-4.1: Find Accounts** — web-searches for real LatAm miners matching the ICP (prose + source URLs).\n**Merge Finder Results** — combines segments and builds the strict JSON schema (adds `domain`, `icp_score`).\n**GPT-4.1: Structure Accounts** — converts the research prose into clean JSON.\n**Parse Accounts** — ranks by `icp_score`, keeps top N. One item per account flows on.",
+        "height": 250,
+        "width": 900,
+        "color": 4
+      },
+      "id": "5d766f38-55a9-475b-b786-07060927f712",
+      "name": "Note — Stage 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1184,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🟡 STAGE 3 — Account Research (runs *before* contacts, so every contact carries its brief)\n**Build Research Prompt → GPT-4.1: Account Research** — web-search per company: recent news, expansion, safety, automation signals.\n**Extract Research** — pulls text + source URLs.\n**Build Research Structuring Prompt → GPT-4.1: Structure Research → Parse Research Brief** — forces the brief into JSON with a `best_hook`. This is the fuel for personalization.",
+        "height": 246,
+        "width": 760,
+        "color": 5
+      },
+      "id": "70d153ff-bb1e-4f99-8eec-c36e9a65f4f4",
+      "name": "Note — Stage 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -528,
+        672
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🔵 STAGE 2 — Contact Discovery (the honest wall)\n**Build Exec Search Prompt → GPT-4.1: Executive Search** — web-search for the right people (Head of Ops, VP HSE, Site Director).\n**Build Tavily Request → Tavily: LinkedIn Lookup → Attach Tavily Results** — LinkedIn-restricted search for name / title / profile evidence.\n**Build Contacts Prompt → GPT-4.1: Structure Contacts → Parse Contacts** — merge into verified contacts (never invents an email).\n**Contact Found?** — routes: found → Email Resolver; none → **Not-Found Log** (kept on purpose = honest failure).",
+        "height": 278,
+        "width": 760,
+        "color": 6
+      },
+      "id": "b5ea9e7b-a256-4bf6-84ee-cdc5e5ef9455",
+      "name": "Note — Stage 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -528,
+        992
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🟢 EMAIL RESOLVER + VERIFIER (custom, fabrication-safe)\nRuns only on FOUND contacts. GPT never originates an email — a data provider does.\n1. `account.domain` (from Stage 1) → else **Hunter Domain Search** resolves it (cached per company).\n2. **Prospeo** Email Finder = primary (75 free/mo).\n3. **Hunter** Email Finder = fallback.\n4. **Hunter Verifier** → tags deliverable / accept_all / etc.\nAdds to each contact: `email`, `email_status`, `email_source`, `email_confidence`, `email_verified_status`, `email_deliverable`.\nKeys live at the top of this node's code.",
+        "height": 354,
+        "width": 640,
+        "color": 2
+      },
+      "id": "e3cfd335-59be-4055-84bd-5a830b986607",
+      "name": "Note — Email Resolver",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -32,
+        1744
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 🟣 STAGE 4 — Email Generation + Critic Gate\n**Build Writer Prompt → GPT-4.1: Write Email → Extract Email Draft** — writes ONE cold email using ONLY the research brief + the resolved contact (specific hook, role-tuned, one proof point).\n**Build Critic Prompt → GPT-4.1: Critic Review → Parse Verdict** — an AI reviewer scores it (specific? role-fit? no fluff / placeholders?).\n**Critic Passed?** — pass → **Keep Draft As Final**; fail → **Build Rewrite → GPT Rewrite → Extract Rewrite** (one improvement pass).\n**Join Email Branches** — merges pass + rewrite back into one stream.",
+        "height": 150,
+        "width": 900,
+        "color": 3
+      },
+      "id": "92b8216d-431a-4265-af88-0a9ee1c1f037",
+      "name": "Note — Stage 4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        208,
+        1376
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## ⚫ OUTPUT\n**Assemble Campaign Output** — one object: accounts, contacts+emails, not-found list, run summary.\n**Compile Research Documentation → Research Doc as File** — *optional* audit trail (.txt) with every source URL. Delete this branch if you don't need the artifact.\n**Flatten Emails for Sheets → Google Sheets: Append Contacts** — one row per contact (company, name, title, email, verified status, hook) appended to your sheet.\n",
+        "height": 248,
+        "width": 760,
+        "color": 7
+      },
+      "id": "6bd5e32a-72f7-4b93-9a82-4ec61dec773e",
+      "name": "Note — Output",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2368,
+        1712
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://zvlchtfozsbjffxkirme.supabase.co/rest/v1/rpc/import_run_results",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"p_run_id\": \"{{ $('Create Run').first().json.id }}\",\n  \"p_payload\": {{ JSON.stringify($json.payload) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3408,
+        960
+      ],
+      "id": "742cca67-5ab0-444a-b3f7-c14a074106ef",
+      "name": "Import Results",
+      "credentials": {
+        "supabaseApi": {
+          "id": "MGEZnMq0DhrbxeF4",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        496,
+        160
+      ],
+      "id": "73539524-244d-4a5d-985f-89a21d8174eb",
+      "name": "Respond to Webhook",
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "run-campaign",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -208,
+        -32
+      ],
+      "id": "8314d351-5098-4ae9-b16a-b2834531ec20",
+      "name": "Webhook",
+      "webhookId": "62c50dc0-7c92-4c4d-89a1-1d2caa3679fe"
+    },
+    {
+      "parameters": {
+        "tableId": "runs",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "running"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        192,
+        48
+      ],
+      "id": "2f214462-2a65-4400-950b-f7bbe6ddc141",
+      "name": "Create Run",
+      "credentials": {
+        "supabaseApi": {
+          "id": "MGEZnMq0DhrbxeF4",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Group the run's output by company and shape it for import_run_results\nconst accountsRaw = $('Parse Accounts').all().map(i => i.json.account).filter(Boolean);\n\nconst researchByCompany = {};\nfor (const it of $('Parse Research Brief').all()) {\n  const j = it.json || {};\n  const co = (j.account && j.account.company) || (j.research && j.research.company);\n  if (co && j.research) researchByCompany[co] = j.research;\n}\n\nconst contactsByCompany = {};\nlet emailsCount = 0;\nfor (const it of $('Join Email Branches').all()) {\n  const j = it.json || {};\n  if (!j.account || !j.contact) continue;\n  const co = j.account.company;\n  const c = j.contact;\n  const raw = String(j.email_final || '');\n  const lines = raw.split('\\n');\n  let subject = '', start = 0;\n  if (lines[0] && lines[0].toLowerCase().startsWith('subject:')) { subject = lines[0].slice(8).trim(); start = 1; }\n  const body = lines.slice(start).join('\\n').trim();\n  const contact = {\n    name: c.name || '', title: c.title || '', seniority: c.seniority || '',\n    role_match: c.role_match || '', linkedin_url: c.linkedin_url || '',\n    evidence_source: c.evidence_source || '', notes: c.notes || '',\n    email: c.email || '', email_status: c.email_status || '',\n    email_source: c.email_source || '',\n    email_confidence: (c.email_confidence == null) ? '' : String(c.email_confidence),\n    email_verified_status: c.email_verified_status || '',\n    email_deliverable: !!c.email_deliverable,\n    company_domain: c.company_domain || (j.account.domain || ''),\n    email_draft: {\n      subject, body, status: 'ready',\n      signal_used: (j.research && j.research.best_hook) || '',\n      critic_verdict: (j.verdict && j.verdict.passed) ? 'passed' : 'passed_after_rewrite',\n      rewritten_after_critic: !!j.rewritten\n    }\n  };\n  (contactsByCompany[co] = contactsByCompany[co] || []).push(contact);\n  if (subject || body) emailsCount++;\n}\n\nconst accounts = accountsRaw.map(a => ({\n  company: a.company || '', domain: a.domain || '', hq_country: a.hq_country || '',\n  latam_sites: a.latam_sites || '', commodity: a.commodity || '',\n  scale_evidence: a.scale_evidence || '', ops_evidence: a.ops_evidence || '',\n  why_fit_vs_anchor: a.why_fit_vs_anchor || '',\n  icp_score: (a.icp_score == null) ? null : a.icp_score,\n  ownership_flags: a.ownership_flags || '', sources: a.sources || [],\n  research: researchByCompany[a.company] || null,\n  contacts: contactsByCompany[a.company] || []\n}));\n\nlet notFound = [];\ntry { notFound = $('Assemble Campaign Output').first().json.contacts_not_found || []; } catch (e) {}\n\nreturn [{ json: { payload: {\n  accounts,\n  summary: {\n    accounts_found: accounts.length,\n    emails_generated: emailsCount,\n    contacts_not_found: notFound.length,\n    contacts_not_found_detail: notFound\n  }\n}}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        960
+      ],
+      "id": "30fb1e27-77dd-431b-a088-4367e5b0d3ec",
+      "name": "Build Run Payload"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Campaign Brief Form": {
+      "main": [
+        []
+      ]
+    },
+    "Build Brief": {
+      "main": [
+        [
+          {
+            "node": "Build Finder Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Finder Prompts": {
+      "main": [
+        [
+          {
+            "node": "GPT-4.1: Find Accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4.1: Find Accounts": {
+      "main": [
+        [
+          {
+            "node": "Merge Finder Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Finder Results": {
+      "main": [
+        [
+          {
+            "node": "GPT-4.1: Structure Accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4.1: Structure Accounts": {
+      "main": [
+        [
+          {
+            "node": "Parse Accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Accounts": {
+      "main": [
+        [
+          {
+            "node": "Build Research Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Research Prompt": {
+      "main": [
+        [
+          {
+            "node": "GPT-4.1: Account Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4.1: Account Research": {
+      "main": [
+        [
+          {
+            "node": "Extract Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Research": {
+      "main": [
+        [
+          {
+            "node": "Build Research Structuring Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Research Structuring Prompt": {
+      "main": [
+        [
+          {
+            "node": "GPT-4.1: Structure Research",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4.1: Structure Research": {
+      "main": [
+        [
+          {
+            "node": "Parse Research Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Research Brief": {
+      "main": [
+        [
+          {
+            "node": "Build Exec Search Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Exec Search Prompt": {
+      "main": [
+        [
+          {
+            "node": "GPT-4.1: Executive Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4.1: Executive Search": {
+      "main": [
+        [
+          {
+            "node": "Extract Exec Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Exec Search": {
+      "main": [
+        [
+          {
+            "node": "Build Tavily Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Tavily Request": {
+      "main": [
+        [
+          {
+            "node": "Tavily: LinkedIn Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tavily: LinkedIn Lookup": {
+      "main": [
+        [
+          {
+            "node": "Attach Tavily Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Tavily Results": {
+      "main": [
+        [
+          {
+            "node": "Build Contacts Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Contacts Prompt": {
+      "main": [
+        [
+          {
+            "node": "GPT-4.1: Structure Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4.1: Structure Contacts": {
+      "main": [
+        [
+          {
+            "node": "Parse Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Contacts": {
+      "main": [
+        [
+          {
+            "node": "Contact Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Contact Found?": {
+      "main": [
+        [
+          {
+            "node": "Resolve Email (Waterfall)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Not-Found Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Writer Prompt": {
+      "main": [
+        [
+          {
+            "node": "GPT-4.1: Write Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4.1: Write Email": {
+      "main": [
+        [
+          {
+            "node": "Extract Email Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Email Draft": {
+      "main": [
+        [
+          {
+            "node": "Build Critic Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Critic Prompt": {
+      "main": [
+        [
+          {
+            "node": "GPT-4.1: Critic Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4.1: Critic Review": {
+      "main": [
+        [
+          {
+            "node": "Parse Verdict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Verdict": {
+      "main": [
+        [
+          {
+            "node": "Critic Passed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Critic Passed?": {
+      "main": [
+        [
+          {
+            "node": "Keep Draft As Final",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Rewrite Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep Draft As Final": {
+      "main": [
+        [
+          {
+            "node": "Join Email Branches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Rewrite Prompt": {
+      "main": [
+        [
+          {
+            "node": "GPT-4.1: Rewrite Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4.1: Rewrite Email": {
+      "main": [
+        [
+          {
+            "node": "Extract Rewrite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Rewrite": {
+      "main": [
+        [
+          {
+            "node": "Join Email Branches",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Join Email Branches": {
+      "main": [
+        [
+          {
+            "node": "Assemble Campaign Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Campaign Output": {
+      "main": [
+        [
+          {
+            "node": "Compile Research Documentation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Flatten Emails for Sheets",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Run Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Research Documentation": {
+      "main": [
+        [
+          {
+            "node": "Research Doc as File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Email (Waterfall)": {
+      "main": [
+        [
+          {
+            "node": "Build Writer Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten Emails for Sheets": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets: Append Contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        [
+          {
+            "node": "Build Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Create Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Run": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Run Payload": {
+      "main": [
+        [
+          {
+            "node": "Import Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "aa102528-d904-4adb-a018-e47fa1c5e176",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "dd82cb5c4cb79a8563a3589b90c50518203063cc694813bb26e8bfa21229ab94"
+  },
+  "nodeGroups": [],
+  "id": "NSMakw9QgMgBjICQ",
+  "tags": [
+    {
+      "updatedAt": "2026-07-15T13:09:54.500Z",
+      "createdAt": "2026-07-15T13:09:54.500Z",
+      "id": "MCWXpxGwRb4jYzdR",
+      "name": "Final_Flow"
+    }
+  ]
+}

@@ -2,7 +2,9 @@
 
 A self-serve web app for running and reviewing an outbound BDR pipeline. A user logs in, clicks **Run Campaign**, and a few minutes later reviews the accounts, research dossiers, contacts, and ready-to-send emails the pipeline produced — with inline email editing, copy-to-clipboard, and one-click "open in Gmail."
 
-This repo is the **frontend only**. The actual agent (account sourcing → research → contact discovery → email writing) runs as an n8n workflow that writes its results into Supabase; this app reads from Supabase and triggers runs via an n8n webhook. See [STACK.md](./STACK.md) for the full system and why each tool is used.
+The actual agent (account sourcing → research → contact discovery → email writing) runs as an n8n workflow that writes its results into Supabase; this app reads from Supabase and triggers runs via an n8n webhook. See [STACK.md](./STACK.md) for the full system and why each tool is used.
+
+**Inspecting the agent logic:** the complete n8n workflow (all nodes, keys redacted) is included here as [`flytbase-bdr-agent.n8n.json`](./flytbase-bdr-agent.n8n.json) — import it into any n8n instance to see the full staged pipeline (account ID → research → contacts + email waterfall → writer/critic/rewrite → Supabase + Google Sheets).
 
 ## Tech stack
 
