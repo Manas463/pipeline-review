@@ -72,37 +72,52 @@ async function fetchAllDrafts(): Promise<{
   return { emails: deduped, contacts: contactsById, accounts: accountsById };
 }
 
+const STATUS_FILTERS = ["Verified", "Risky", "Invalid", "Not found"] as const;
+
 function DraftsPage() {
-  const [sort, setSort] = useState<"newest" | "oldest" | "verified">("newest");
+  const [sort, setSort] = useState<"newest" | "oldest">("newest");
+  const [filters, setFilters] = useState<Set<string>>(() => new Set());
   const { data, isLoading, error } = useQuery({
     queryKey: ["drafts"],
     queryFn: fetchAllDrafts,
   });
 
-  const sortedEmails = useMemo(() => {
+  const toggleFilter = (s: string) =>
+    setFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      return next;
+    });
+
+  // Filter (multi-select, narrows what's shown) and sort (orders what's left) are independent —
+  // so you can e.g. show only Verified AND sort Newest at the same time.
+  const shown = useMemo(() => {
     if (!data) return [];
-    const arr = [...data.emails]; // fetched newest-first
-    if (sort === "oldest") return arr.reverse();
-    if (sort === "verified") {
-      const isVerified = (e: Email) => {
+    let arr = data.emails; // fetched newest-first
+    if (filters.size > 0) {
+      arr = arr.filter((e) => {
         const c = data.contacts[e.contact_id];
-        return c ? normalizeStatus(c).label === "Verified" : false;
-      };
-      // stable sort: verified drafts first, newest-first order preserved within each group
-      return arr.sort((a, b) => Number(isVerified(b)) - Number(isVerified(a)));
+        const label = c ? normalizeStatus(c).label : "Unknown";
+        return filters.has(label);
+      });
     }
-    return arr;
-  }, [data, sort]);
+    const out = [...arr];
+    if (sort === "oldest") out.reverse();
+    return out;
+  }, [data, sort, filters]);
 
   return (
     <div>
-      <Link
-        to="/"
-        className="inline-flex items-center gap-3 text-muted-foreground hover:text-primary mb-6"
-      >
-        <span aria-hidden className="text-3xl leading-none">←</span>
-        <span className="label">Home</span>
-      </Link>
+      <div className="mb-6">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-3 text-muted-foreground hover:text-primary"
+        >
+          <span aria-hidden className="text-3xl leading-none">←</span>
+          <span className="label">Home</span>
+        </Link>
+      </div>
       <Eyebrow>03 / Drafts</Eyebrow>
       <SectionTitle>All drafted emails</SectionTitle>
 
@@ -115,27 +130,67 @@ function DraftsPage() {
 
       {data && data.emails.length > 0 && (
         <div className="mt-8">
-          <p className="label text-muted-foreground mb-4">
-            {data.emails.length} draft{data.emails.length === 1 ? "" : "s"} across all runs
-          </p>
-          <div className="mb-8 flex items-center gap-3 flex-wrap">
-            <span className="label text-muted-foreground">Sort</span>
-            {(["newest", "oldest", "verified"] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setSort(s)}
-                className={`label px-3 py-2 border capitalize ${
-                  sort === s
-                    ? "border-primary text-primary"
-                    : "border-border text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {s === "verified" ? "Verified first" : `${s} first`}
-              </button>
-            ))}
+          <div className="mb-8 flex items-start justify-between gap-6 flex-wrap">
+            <p className="label text-muted-foreground">
+              {filters.size > 0
+                ? `${shown.length} of ${data.emails.length} drafts`
+                : `${data.emails.length} draft${data.emails.length === 1 ? "" : "s"} across all runs`}
+            </p>
+            <div className="flex items-start gap-6 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="label text-muted-foreground mr-1">Filter</span>
+                {STATUS_FILTERS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => toggleFilter(s)}
+                    className={`label px-3 py-2 border ${
+                      filters.has(s)
+                        ? "border-primary text-primary"
+                        : "border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+                {filters.size > 0 && (
+                  <button
+                    onClick={() => setFilters(new Set())}
+                    className="label px-2 py-2 text-muted-foreground hover:text-primary underline decoration-dotted underline-offset-4"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="label text-muted-foreground mr-1">Sort</span>
+                <button
+                  onClick={() => setSort("newest")}
+                  className={`label px-3 py-2 border ${
+                    sort === "newest"
+                      ? "border-primary text-primary"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Newest
+                </button>
+                <button
+                  onClick={() => setSort("oldest")}
+                  className={`label px-3 py-2 border ${
+                    sort === "oldest"
+                      ? "border-primary text-primary"
+                      : "border-border text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  Oldest
+                </button>
+              </div>
+            </div>
           </div>
+          {shown.length === 0 && (
+            <p className="text-muted-foreground mb-8">No drafts match the selected filters.</p>
+          )}
           <div className="space-y-8">
-            {sortedEmails.map((email) => {
+            {shown.map((email) => {
               const contact = data.contacts[email.contact_id];
               const account = contact ? data.accounts[contact.account_id as string] : undefined;
               return (

@@ -73,30 +73,33 @@ function AccountsList() {
 
   return (
     <div>
-      <Link
-        to="/"
-        className="inline-flex items-center gap-3 text-muted-foreground hover:text-primary mb-6"
-      >
-        <span aria-hidden className="text-3xl leading-none">←</span>
-        <span className="label">Home</span>
-      </Link>
+      <div className="mb-6">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-3 text-muted-foreground hover:text-primary"
+        >
+          <span aria-hidden className="text-3xl leading-none">←</span>
+          <span className="label">Home</span>
+        </Link>
+      </div>
       <Eyebrow>02 / Accounts</Eyebrow>
-      <SectionTitle>Sourced across all runs</SectionTitle>
-
-      <div className="mt-6 flex items-center gap-3">
-        <span className="label text-muted-foreground">Sort</span>
-        <button
-          onClick={() => setOrder("newest")}
-          className={`label px-3 py-2 border ${order === "newest" ? "border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
-        >
-          Newest first
-        </button>
-        <button
-          onClick={() => setOrder("oldest")}
-          className={`label px-3 py-2 border ${order === "oldest" ? "border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
-        >
-          Oldest first
-        </button>
+      <div className="flex items-end justify-between gap-4 flex-wrap">
+        <SectionTitle>Sourced across all runs</SectionTitle>
+        <div className="flex items-center gap-2">
+          <span className="label text-muted-foreground mr-1">Sort</span>
+          <button
+            onClick={() => setOrder("newest")}
+            className={`label px-3 py-2 border ${order === "newest" ? "border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+          >
+            Newest
+          </button>
+          <button
+            onClick={() => setOrder("oldest")}
+            className={`label px-3 py-2 border ${order === "oldest" ? "border-primary text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+          >
+            Oldest
+          </button>
+        </div>
       </div>
 
       {isLoading && <p className="mt-8 text-muted-foreground">Loading…</p>}
