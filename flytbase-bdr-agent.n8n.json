@@ -1227,6 +1227,20 @@
       ],
       "id": "30fb1e27-77dd-431b-a088-4367e5b0d3ec",
       "name": "Build Run Payload"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Deterministic em/en dash remover. Runs AFTER the critic + rewrite loop, so no em dash can\n// survive into the final email regardless of what the model did. Prompt instructions alone\n// never fully eliminate this, this guarantees it.\nfunction deDash(s) {\n  if (s == null) return s;\n  return String(s)\n    .replace(/\\s*[\u2014\u2013\u2015]\\s*/g, ', ')\n    .replace(/\\s+,/g, ',')\n    .replace(/,\\s*,/g, ',')\n    .replace(/,\\s*\\./g, '.')\n    .replace(/[ \\t]{2,}/g, ' ');\n}\nreturn $input.all().map(({ json: j }) => {\n  const out = { ...j };\n  if (out.email_final) out.email_final = deDash(out.email_final);\n  return { json: out };\n});"
+      },
+      "id": "b3fbbd15-9ed2-4c6b-970f-a0e713c73f08",
+      "name": "Strip Em Dashes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2752,
+        1448
+      ]
     }
   ],
   "pinData": {},
@@ -1617,7 +1631,7 @@
       "main": [
         [
           {
-            "node": "Assemble Campaign Output",
+            "node": "Strip Em Dashes",
             "type": "main",
             "index": 0
           }
@@ -1716,6 +1730,17 @@
         [
           {
             "node": "Import Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Strip Em Dashes": {
+      "main": [
+        [
+          {
+            "node": "Assemble Campaign Output",
             "type": "main",
             "index": 0
           }
